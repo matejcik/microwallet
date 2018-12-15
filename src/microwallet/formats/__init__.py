@@ -1,12 +1,8 @@
-#!/usr/bin/env python3
-
-import os
-import sys
-
 import construct as c
 
 
 def Optional(subcon):
+    """Custom version of Optional which fixes construct issue #760"""
     select = c.Select(subcon, c.Pass)
     select.flagbuildnone = True
     return select
@@ -16,9 +12,11 @@ CompactUintStruct = c.Struct(
     "base" / c.Int8ul,
     "ext" / c.Switch(c.this.base, {0xFD: c.Int16ul, 0xFE: c.Int32ul, 0xFF: c.Int64ul}),
 )
+"""Struct for Bitcoin's Compact uint / varint"""
 
 
 class CompactUintAdapter(c.Adapter):
+    """Adapter for Bitcoin's Compact uint / varint"""
     def _encode(self, obj, context, path):
         if obj < 0xFD:
             return {"base": obj, "ext": None}
@@ -35,6 +33,12 @@ class CompactUintAdapter(c.Adapter):
 
 
 class ConstFlag(c.Adapter):
+    """Constant value that might or might not be present.
+
+    When parsing, if the appropriate value is found, it is consumed and
+    this field set to True.
+    When building, if True, the constant is inserted, otherwise it is omitted.
+    """
     def __init__(self, const):
         self.const = const
         super().__init__(
@@ -53,27 +57,11 @@ class ConstFlag(c.Adapter):
 
 
 CompactUint = CompactUintAdapter(CompactUintStruct)
-BitcoinBytes = c.Prefixed(CompactUint, c.GreedyBytes)
+"""Bitcoin Compact uint construct.
 
-TxInput = c.Struct(
-    "tx" / c.Bytes(32),
-    "index" / c.Int32ul,
-    "script" / BitcoinBytes,
-    "sequence" / c.Int32ul,
-)
-
-TxOutput = c.Struct(
-    "value" / c.Int64ul, "pk_script" / BitcoinBytes
-)
-
-TxInputWitness = c.PrefixedArray(CompactUint, BitcoinBytes)
-
-Transaction = c.Struct(
-    "version" / c.Int32ul,
-    "segwit" / ConstFlag(b"\x00\x01"),
-    "inputs" / c.PrefixedArray(CompactUint, TxInput),
-    "outputs" / c.PrefixedArray(CompactUint, TxOutput),
-    "witness" / c.If(c.this.segwit, TxInputWitness[c.len_(c.this.inputs)]),
-    "lock_time" / c.Int32ul,
-    c.Terminated,
-)
+Encodes an int as either:
+- a single byte the value is smaller than 253 (0xFD)
+- 0xFD + uint16 if the value fits into uint16
+- 0xFE + uint32 if the value fits into uint32
+- 0xFF + uint64 if the value is bigger.
+"""
