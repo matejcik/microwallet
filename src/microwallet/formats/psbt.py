@@ -1,10 +1,8 @@
 from collections import namedtuple
-import io
-import struct
 
 import construct as c
 
-from . import CompactUint
+from . import CompactUint, Optional
 from .transaction import Transaction, TxOutput
 
 
@@ -12,66 +10,26 @@ class PsbtError(Exception):
     pass
 
 
-def _read_or_raise(reader, n):
-    res = reader.read(n)
-    if len(res) < n:
-        raise IOError("Not enough data read")
-    return res
-
-
-def read_compact_uint(reader):
-    leader = _read_or_raise(reader, 1)[0]
-    if leader < 0xFD:
-        return leader
-
-    num_bytes = 2 ** (leader - 0xFC)
-    value_bytes = _read_or_raise(reader, num_bytes)
-    return int.from_bytes(value_bytes, "little")
-
-
-def write_compact_uint(writer, value):
-    if value < 0xFD:
-        out = struct.pack("<B", value)
-    elif value <= 0xFFFF:
-        out = struct.pack("<BH", 0xFD, value)
-    elif value <= 0xFFFF_FFFF:
-        out = struct.pack("<BL", 0xFE, value)
-    elif value <= 0xFFFF_FFFF_FFFF_FFFF:
-        out = struct.pack("<BQ", 0xFF, value)
-    else:
-        raise PsbtError("Value too big for compact uint")
-    writer.write(out)
-
-
-def read_keyvalues(reader):
-    while True:
-        keylen = read_compact_uint(reader)
-        if keylen == 0:
-            break
-        keybytes = _read_or_raise(reader, keylen)
-        b = io.BytesIO(keybytes)
-        key = read_compact_uint(b)
-        keydata = b.read()
-        valuelen = read_compact_uint(reader)
-        valuebytes = _read_or_raise(reader, valuelen)
-        yield key, keydata, valuebytes
-
-
-def write_keyvalue(writer, key, keydata, value):
-    if keydata is None:
-        keydata = b""
-    b = io.BytesIO()
-    write_compact_uint(b, key)
-    b.write(keydata)
-    key_bytes = b.getvalue()
-
-    write_compact_uint(writer, len(key_bytes))
-    writer.write(key_bytes)
-    write_compact_uint(writer, len(value))
-    writer.write(value)
-
-
 # fmt: off
+PsbtKeyValue = c.Struct(
+    "key" / c.Prefixed(CompactUint, c.Struct(
+        "type" / CompactUint,
+        "data" / Optional(c.GreedyBytes),
+    )),
+    "value" / c.Prefixed(CompactUint, c.GreedyBytes),
+)
+
+PsbtSequence = c.FocusedSeq("content",
+    "content" / c.GreedyRange(PsbtKeyValue),
+    c.Const(b"\0"),
+)
+
+PsbtEnvelope = c.FocusedSeq("sequences",
+    "magic" / c.Const(b"psbt\xff"),
+    "sequences" / c.GreedyRange(PsbtSequence),
+    c.Terminated,
+)
+
 Bip32Field = c.Struct(
     "fingerprint" / c.Int32ul,
     "address_n" / c.GreedyRange(c.Int32ul),
@@ -123,49 +81,51 @@ class PsbtMapType:
             raise PsbtError("Unknown field type")
 
     @classmethod
-    def read(cls, reader):
+    def from_sequence(cls, sequence):
         psbt = cls()
         seen_keys = set()
-        for key, keydata, value in read_keyvalues(reader):
-            if (key, keydata) in seen_keys:
+        for v in sequence:
+            key = v.key.type
+            if (key, v.key.data) in seen_keys:
                 raise PsbtError(f"Duplicate key type 0x{key:02x}")
-            seen_keys.add((key, keydata))
+            seen_keys.add((key, v.key.data))
 
             if key not in cls.FIELDS:
                 raise PsbtError(f"Unknown field type 0x{key:02x}")
             name, keydata_type, value_type = cls.FIELDS[key]
-            if keydata_type is None and keydata:
+            if keydata_type is None and v.key.data:
                 raise PsbtError(f"Key data not allowed on '{name}'")
-            if keydata_type is not None and not keydata:
+            if keydata_type is not None and not v.key.data:
                 raise PsbtError(f"Key data missing on '{name}'")
 
-            parsed_key = cls._decode_field(keydata_type, keydata)
-            parsed_value = cls._decode_field(value_type, value)
+            parsed_key = cls._decode_field(keydata_type, v.key.data)
+            parsed_value = cls._decode_field(value_type, v.value)
             if keydata_type:
                 getattr(psbt, name)[parsed_key] = parsed_value
             else:
                 setattr(psbt, name, parsed_value)
         return psbt
 
-    def write(self, writer):
+    def to_sequence(self):
+        sequence = []
         for key, (name, keydata_type, value_type) in self.FIELDS.items():
             if keydata_type is None:
                 value = getattr(self, name)
                 if value is None:
                     continue
-                write_keyvalue(writer, key, None, self._encode_field(value_type, value))
+                value_bytes = self._encode_field(value_type, value)
+                v = dict(key=dict(type=key, data=None), value=value_bytes)
+                sequence.append(v)
             else:
                 values = getattr(self, name)
                 if values == {}:
                     continue
                 for keydata, value in values.items():
-                    write_keyvalue(
-                        writer,
-                        key,
-                        self._encode_field(keydata_type, keydata),
-                        self._encode_field(value_type, value),
-                    )
-        writer.write(b"\0")
+                    keydata_bytes = self._encode_field(keydata_type, keydata)
+                    value_bytes = self._encode_field(value_type, value)
+                    v = dict(key=dict(type=key, data=keydata_bytes), value=value_bytes)
+                    sequence.append(v)
+        return sequence
 
 
 class PsbtGlobalType(PsbtMapType):
@@ -217,30 +177,29 @@ class PsbtOutputType(PsbtMapType):
 
 
 def read_psbt(psbt_bytes):
-    reader = io.BytesIO(psbt_bytes)
-    header = reader.read(5)
-    if header != b"psbt\xff":
-        raise PsbtError("Invalid PSBT header")
-
     try:
-        tx_entry = PsbtGlobalType.read(reader)
+        psbt = PsbtEnvelope.parse(psbt_bytes)
+        if not psbt:
+            raise PsbtError("Empty PSBT envelope")
+        tx_entry = PsbtGlobalType.from_sequence(psbt[0])
         tx = tx_entry.transaction
-        inputs = []
-        outputs = []
-        inputs = [PsbtInputType.read(reader) for _ in tx.inputs]
-        outputs = [PsbtOutputType.read(reader) for _ in tx.outputs]
+        if len(psbt) != 1 + len(tx.inputs) + len(tx.outputs):
+            raise PsbtError("PSBT length does not match embedded transaction")
+
+        input_seqs = psbt[1 : 1 + len(tx.inputs)]
+        output_seqs = psbt[1 + len(tx.inputs) :]
+        inputs = [PsbtInputType.from_sequence(s) for s in input_seqs]
+        outputs = [PsbtOutputType.from_sequence(s) for s in output_seqs]
         return tx, inputs, outputs
-    except IOError as e:
-        raise PsbtError("Not enough data in PSBT") from e
+
+    except c.ConstructError as e:
+        raise PsbtError("Could not parse PBST") from e
 
 
 def write_psbt(tx, inputs, outputs):
-    writer = io.BytesIO()
-    writer.write(b"psbt\xff")
+    sequences = []
     tx_entry = PsbtGlobalType(transaction=tx)
-    tx_entry.write(writer)
-    for inp in inputs:
-        inp.write(writer)
-    for out in outputs:
-        out.write(writer)
-    return writer.getvalue()
+    sequences.append(tx_entry.to_sequence())
+    sequences += [inp.to_sequence() for inp in inputs]
+    sequences += [out.to_sequence() for out in outputs]
+    return PsbtEnvelope.build(sequences)
