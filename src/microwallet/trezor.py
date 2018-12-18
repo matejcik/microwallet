@@ -26,4 +26,4 @@ def get_account(client, coin_name, number, legacy=False):
     n = btc.get_public_node(
         client, path_prefix, coin_name=coin_name, script_type=script_type
     )
-    return account.Account(coin_name, n.node, account_type)
+    return account.Account(coin_name, n.node, account_type, path=path_prefix)
