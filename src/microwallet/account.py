@@ -10,7 +10,8 @@ from trezorlib.messages import InputScriptType, OutputScriptType
 from trezorlib.ckd_public import public_ckd, get_subnode
 
 from .blockbook import BlockbookBackend
-from . import address, exceptions
+from .formats import address
+from . import exceptions
 
 
 class AccountType(Enum):

@@ -63,8 +63,8 @@ class BlockbookBackend:
             for vin in txdata["vin"]:
                 spent_vouts.add((vin["txid"], vin["vout"]))
             for vout in txdata["vout"]:
-                if address in vout["scriptPubKey"]["addreses"]:
-                    txo = (txhash, vout["n"]), vout["value"]
+                if address in vout["scriptPubKey"]["addresses"]:
+                    txo = (txhash, vout["n"]), Decimal(vout["value"])
                     txos.append(txo)
 
         return [(*vout, value) for vout, value in txos if vout not in spent_vouts]
