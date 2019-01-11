@@ -9,7 +9,12 @@ with open("README.rst") as readme_file:
 with open("HISTORY.rst") as history_file:
     history = history_file.read()
 
-requirements = ["Click>=7,<8", "trezor>=0.11"]
+requirements = [
+    "Click>=7,<8",
+    "trezor>=0.11",
+    "python-bitcoinlib>=0.10.1",
+    "attrs>=18.1.0",
+]
 
 setup(
     author='Jan "matejcik" Matějek',
@@ -33,6 +38,7 @@ setup(
     name="microwallet",
     packages=find_packages("src", include=["microwallet"]),
     package_dir={"": "src"},
+    python_requires=">=3.6",
     url="https://github.com/matejcik/microwallet",
     version="0.1.0",
     zip_safe=False,

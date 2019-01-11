@@ -11,14 +11,12 @@ Encoded as a CompactUint length followed by that many bytes.
 TxInput = c.Struct(
     "tx" / c.Bytes(32),
     "index" / c.Int32ul,
-    "script" / BitcoinBytes,
+    "script_sig" / BitcoinBytes,
     "sequence" / c.Int32ul,
 )
 """Transaction input."""
 
-TxOutput = c.Struct(
-    "value" / c.Int64ul, "pk_script" / BitcoinBytes
-)
+TxOutput = c.Struct("value" / c.Int64ul, "script_pubkey" / BitcoinBytes)
 """Transaction output."""
 
 TxInputWitness = c.PrefixedArray(CompactUint, BitcoinBytes)

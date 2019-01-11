@@ -1,3 +1,5 @@
+import struct
+
 import construct as c
 
 
@@ -17,6 +19,7 @@ CompactUintStruct = c.Struct(
 
 class CompactUintAdapter(c.Adapter):
     """Adapter for Bitcoin's Compact uint / varint"""
+
     def _encode(self, obj, context, path):
         if obj < 0xFD:
             return {"base": obj, "ext": None}
@@ -39,6 +42,7 @@ class ConstFlag(c.Adapter):
     this field set to True.
     When building, if True, the constant is inserted, otherwise it is omitted.
     """
+
     def __init__(self, const):
         self.const = const
         super().__init__(
@@ -65,3 +69,17 @@ Encodes an int as either:
 - 0xFE + uint32 if the value fits into uint32
 - 0xFF + uint64 if the value is bigger.
 """
+
+
+def op_push(data):
+    n = len(data)
+    if n > 0xFFFF_FFFF:
+        raise ValueError("data too big for OP_PUSH")
+    if n < 0x4C:
+        return struct.pack("<B", n)
+    elif n < 0xFF:
+        return struct.pack("<BB", 0x4C, n)
+    elif n < 0xFFFF:
+        return struct.pack("<BS", 0x4D, n)
+    else:
+        return struct.pack("<BL", 0x4E, n)

@@ -44,28 +44,32 @@ class BlockbookBackend:
 
     def get_address_data(self, address):
         address_data = self.fetch_json("address", address)
-        try:
-            for key in ("balance", "totalReceived", "totalSent"):
-                if key in address_data:
-                    address_data[key] = Decimal(address_data[key] or 0)
-        except:
-            print(address_data)
-            raise
+        for key in ("balance", "totalReceived", "totalSent"):
+            if key in address_data:
+                address_data[key] = Decimal(address_data[key] or 0)
         return address_data
 
-    def find_utxos(self, address_data):
+    def estimate_fee(self, blocks):
+        result = self.fetch_json("estimatefee", blocks)
+        return Decimal(result["result"])
+
+    def find_utxos(self, thread_pool, address_data):
         txos = []
         spent_vouts = set()
         # TODO transaction pagination
         address = address_data["addrStr"]
-        for txhash in address_data["transactions"]:
-            txdata = self.get_txdata(txhash)
+        transactions = thread_pool.map(self.get_txdata, address_data["transactions"])
+        for txdata in transactions:
             for vin in txdata["vin"]:
                 spent_vouts.add((vin["txid"], vin["vout"]))
             for vout in txdata["vout"]:
                 if address in vout["scriptPubKey"]["addresses"]:
-                    txo = (txhash, vout["n"]), Decimal(vout["value"])
+                    txo = txdata, vout["n"], Decimal(vout["value"])
                     txos.append(txo)
 
-        return [(*vout, value) for vout, value in txos if vout not in spent_vouts]
+        return [
+            (prevtx, prevout, value)
+            for prevtx, prevout, value in txos
+            if (prevtx["txid"], prevout) not in spent_vouts
+        ]
 

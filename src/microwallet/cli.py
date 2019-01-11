@@ -4,8 +4,9 @@ import sys
 from decimal import Decimal
 
 import click
+from trezorlib import btc
 
-from . import account, trezor
+from . import account, account_type, trezor, exceptions
 
 
 class ChoiceType(click.Choice):
@@ -19,9 +20,9 @@ class ChoiceType(click.Choice):
 
 
 ACCOUNT_TYPES = {
-    "legacy": account.AccountType.LEGACY,
-    "default": account.AccountType.P2SH_SEGWIT,
-    "segwit": account.AccountType.SEGWIT,
+    "legacy": account_type.ACCOUNT_TYPE_LEGACY,
+    "default": account_type.ACCOUNT_TYPE_DEFAULT,
+    "segwit": account_type.ACCOUNT_TYPE_SEGWIT,
 }
 
 
@@ -86,7 +87,7 @@ def show(obj, utxo):
     if utxo:
         total = Decimal(0)
         for address, tx, vout, value in account.find_utxos():
-            click.echo(f"{address.str}: {tx}:{vout} - {value} {symbol}")
+            click.echo(f"{address.str}: {tx['txid']}:{vout} - {value} {symbol}")
             total += value
     else:
         total = account.balance()
@@ -95,8 +96,46 @@ def show(obj, utxo):
 
 @main.command()
 @click.pass_obj
-def history(obj):
-    _, account = obj
+@click.option("-s/-S", "--show/--no-show", help="Display address on Trezor")
+def receive(obj, show):
+    client, account = obj
+    address = account.get_unused_address()
+    click.echo(address.str)
+    if show:
+        trezor.show_address(client, account, address)
+
+
+@main.command()
+@click.pass_obj
+# fmt: off
+@click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
+@click.option("-n", "--dry-run", is_flag=True, help="Do not sign with Trezor")
+# fmt: on
+@click.argument("address")
+@click.argument("amount", type=Decimal)
+def send(obj, address, amount, verbose, dry_run):
+    client, account = obj
+    try:
+        recipients = [(address, amount)]
+        utxos, change = account.fund_tx(recipients)
+        if verbose:
+            symbol = account.coin["shortcut"]
+            click.echo("Spending from:")
+            total_in = Decimal(0)
+            total_out = amount + Decimal(change) / Decimal(1e8)
+            for _, tx, prevout, amount in utxos:
+                click.echo(f"{tx['txid']}:{prevout} - {amount} {symbol}")
+                total_in += amount
+            fee_rate = account.estimate_fee()
+            actual_fee = total_in - total_out
+            click.echo(f"Fee: {actual_fee} {symbol} (at {fee_rate} sat/KB)")
+
+        if not dry_run:
+            _, signed_tx = trezor.sign_tx(client, account, utxos, recipients, change)
+            print(signed_tx.hex())
+
+    except exceptions.InsufficientFunds:
+        die("Insufficient funds")
 
 
 if __name__ == "__main__":
