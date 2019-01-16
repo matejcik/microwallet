@@ -7,6 +7,7 @@ import click
 from trezorlib import btc
 
 from . import account, account_type, trezor, exceptions
+from .blockbook import BlockbookBackend
 
 
 class ChoiceType(click.Choice):
@@ -69,21 +70,25 @@ def select_trezor(trezor_path):
 @click.group()
 # fmt: off
 @click.option("-c", "--coin-name", default="Bitcoin", help="Coin name")
+@click.option("-u", "--url", default=os.environ.get("BLOCKBOOK_URL"), help="Blockbook backend URL")
 @click.option("-a", "--account", "account_num", type=int, default=0, help="Account number")
 @click.option("-t", "--type", "account_type", type=ChoiceType(ACCOUNT_TYPES), default="default", help="Account type")
 @click.option("-p", "--trezor-path", default=os.environ.get("TREZOR_PATH"), help="Path to Trezor device")
 @click.option("-x", "--xpub", help="Use this xpub instead of retrieving an account from Trezor")
 @click.pass_context
 # fmt: on
-def main(ctx, coin_name, account_num, account_type, trezor_path, xpub):
+def main(ctx, coin_name, account_num, account_type, trezor_path, xpub, url):
     """Console script for microwallet."""
     if not xpub:
         client = select_trezor(trezor_path)
         acc = trezor.get_account(client, coin_name, account_num, account_type)
-        ctx.obj = client, acc
     else:
+        client = None
         acc = account.Account.from_xpub(coin_name, xpub)
-        ctx.obj = None, acc
+
+    if url:
+        acc.backend = BlockbookBackend(coin_name, urls=[url])
+    ctx.obj = client, acc
 
 
 def progress(addrs=None, txes=None):
