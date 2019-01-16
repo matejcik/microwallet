@@ -1,7 +1,9 @@
+import asyncio
+import json
 import random
 from decimal import Decimal
 
-import requests
+import aiohttp
 
 from trezorlib import coins, tx_api
 
@@ -21,45 +23,60 @@ class BlockbookBackend:
         if not self.urls:
             raise ValueError("No backend URLs found")
 
-    def fetch_json(self, *path, **params):
+        self.session = aiohttp.ClientSession()
+
+    async def fetch_json(self, *path, **params):
         backend = random.choice(self.urls)
         url = backend + "/api/" + "/".join(map(str, path))
-        r = requests.get(url, params=params)
+        r = await self.session.get(url, params=params)
         r.raise_for_status()
-        return r.json(parse_float=Decimal)
+        json_loads = lambda s: json.loads(s, parse_float=Decimal)
+        return await r.json(loads=json_loads)
 
-    def get_txdata(self, txhash):
-        data = self.fetch_json("tx", txhash)
+    async def get_txdata(self, txhash):
+        data = await self.fetch_json("tx", txhash)
         if tx_api.is_zcash(self.coin) and data.get("vjoinsplit") and "hex" not in data:
-            j = self.fetch_json("rawtx", txhash)
+            j = await self.fetch_json("rawtx", txhash)
             data["hex"] = j["rawtx"]
         return data
 
     def decode_txdata(self, txdata):
         return tx_api.json_to_tx(self.coin, txdata)
 
-    def get_tx(self, txhash):
-        txdata = self.get_txdata(txhash)
+    async def get_tx(self, txhash):
+        txdata = await self.get_txdata(txhash)
         return self.decode_txdata(txdata)
 
-    def get_address_data(self, address):
-        address_data = self.fetch_json("address", address)
-        for key in ("balance", "totalReceived", "totalSent"):
-            if key in address_data:
-                address_data[key] = Decimal(address_data[key] or 0)
-        return address_data
+    async def get_address_data(self, address, all_pages=False):
+        async def get_page(page):
+            address_data = await self.fetch_json("address", address, page=page)
+            for key in ("balance", "totalReceived", "totalSent"):
+                if key in address_data:
+                    address_data[key] = Decimal(address_data[key] or 0)
+            return address_data
 
-    def estimate_fee(self, blocks):
-        result = self.fetch_json("estimatefee", blocks)
+        first_page = await get_page(1)
+        if all_pages and first_page["totalPages"] > 1:
+            pages = [get_page(n) for n in range(2, first_page["totalPages"] + 1)]
+            for fut in asyncio.as_completed(pages):
+                page = await fut
+                first_page["transactions"] += page["transactions"]
+
+        return first_page
+
+    async def estimate_fee(self, blocks):
+        result = await self.fetch_json("estimatefee", blocks)
         return Decimal(result["result"])
 
-    def find_utxos(self, thread_pool, address_data):
+    async def get_utxos(self, address_data, progress=lambda: None):
         txos = []
         spent_vouts = set()
         # TODO transaction pagination
         address = address_data["addrStr"]
-        transactions = thread_pool.map(self.get_txdata, address_data["transactions"])
-        for txdata in transactions:
+        transactions = [self.get_txdata(tx) for tx in address_data["transactions"]]
+        for fut in asyncio.as_completed(transactions):
+            txdata = await fut
+            progress()
             for vin in txdata["vin"]:
                 spent_vouts.add((vin["txid"], vin["vout"]))
             for vout in txdata["vout"]:

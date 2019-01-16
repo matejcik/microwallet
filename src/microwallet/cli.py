@@ -39,16 +39,7 @@ def die(message=None, code=1):
     sys.exit(code)
 
 
-@click.group()
-# fmt: off
-@click.option("-c", "--coin-name", default="Bitcoin", help="Coin name")
-@click.option("-a", "--account", "account_num", type=int, default=0, help="Account number")
-@click.option("-t", "--type", "account_type", type=ChoiceType(ACCOUNT_TYPES), default="default", help="Account type")
-@click.option("-p", "--trezor-path", default=os.environ.get("TREZOR_PATH"), help="Path to Trezor device")
-@click.pass_context
-# fmt: on
-def main(ctx, coin_name, account_num, account_type, trezor_path):
-    """Console script for microwallet."""
+def select_trezor(trezor_path):
     trezors = trezor.get_all_clients()
     if not trezors:
         die("Please connect your Trezor device")
@@ -65,17 +56,43 @@ def main(ctx, coin_name, account_num, account_type, trezor_path):
             click.echo(f"More than one Trezor matches {trezor_path}:")
             print_trezors(selected_trezors)
             die("Please refine your selection")
-        client = selected_trezors[0]
+        return selected_trezors[0]
     elif len(trezors) > 1:
         click.echo("Multiple Trezor devices are connected.")
         click.echo("Please specify one with the -p <path> argument:")
         print_trezors(trezors)
         die()
     else:
-        client = trezors[0]
+        return trezors[0]
 
-    account = trezor.get_account(client, coin_name, account_num, account_type)
-    ctx.obj = client, account
+
+@click.group()
+# fmt: off
+@click.option("-c", "--coin-name", default="Bitcoin", help="Coin name")
+@click.option("-a", "--account", "account_num", type=int, default=0, help="Account number")
+@click.option("-t", "--type", "account_type", type=ChoiceType(ACCOUNT_TYPES), default="default", help="Account type")
+@click.option("-p", "--trezor-path", default=os.environ.get("TREZOR_PATH"), help="Path to Trezor device")
+@click.option("-x", "--xpub", help="Use this xpub instead of retrieving an account from Trezor")
+@click.pass_context
+# fmt: on
+def main(ctx, coin_name, account_num, account_type, trezor_path, xpub):
+    """Console script for microwallet."""
+    if not xpub:
+        client = select_trezor(trezor_path)
+        acc = trezor.get_account(client, coin_name, account_num, account_type)
+        ctx.obj = client, acc
+    else:
+        acc = account.Account.from_xpub(coin_name, xpub)
+        ctx.obj = None, acc
+
+
+def progress(addrs=None, txes=None):
+    out = []
+    if addrs is not None:
+        out.append(f"{addrs} addresses")
+    if txes is not None:
+        out.append(f"{txes} transactions")
+    click.echo("\033[KLoading, " + ", ".join(out) + "...\r", nl=False)
 
 
 @main.command()
@@ -86,9 +103,10 @@ def show(obj, utxo):
     symbol = account.coin["shortcut"]
     if utxo:
         total = Decimal(0)
-        for address, tx, vout, value in account.find_utxos():
+        for address, tx, vout, value in account.find_utxos(progress=progress):
             click.echo(f"{address.str}: {tx['txid']}:{vout} - {value} {symbol}")
             total += value
+        print("\r\033[K")
     else:
         total = account.balance()
     click.echo(f"Balance: {total} {symbol}")
@@ -101,7 +119,7 @@ def receive(obj, show):
     client, account = obj
     address = account.get_unused_address()
     click.echo(address.str)
-    if show:
+    if client and show:
         trezor.show_address(client, account, address)
 
 
@@ -130,7 +148,7 @@ def send(obj, address, amount, verbose, dry_run):
             actual_fee = total_in - total_out
             click.echo(f"Fee: {actual_fee} {symbol} (at {fee_rate} sat/KB)")
 
-        if not dry_run:
+        if client and not dry_run:
             _, signed_tx = trezor.sign_tx(client, account, utxos, recipients, change)
             print(signed_tx.hex())
 

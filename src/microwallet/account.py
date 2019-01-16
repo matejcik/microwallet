@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 from enum import Enum
 import functools
@@ -11,7 +12,7 @@ from trezorlib.messages import InputScriptType, OutputScriptType
 from trezorlib.ckd_public import public_ckd, get_subnode
 
 from .blockbook import BlockbookBackend
-from .formats import transaction
+from .formats import transaction, xpub
 from . import exceptions
 from .address import Address, derive_output_script
 from .account_type import ACCOUNT_TYPE_LEGACY, ACCOUNT_TYPE_DEFAULT, ACCOUNT_TYPE_SEGWIT
@@ -20,7 +21,11 @@ from .account_type import ACCOUNT_TYPE_LEGACY, ACCOUNT_TYPE_DEFAULT, ACCOUNT_TYP
 RBF_SEQUENCE_NUMBER = 0xFFFF_FFFD
 SATOSHIS = Decimal(1e8)
 
-THREAD_POOL = ThreadPoolExecutor(max_workers=100)
+THREAD_POOL = ThreadPoolExecutor(max_workers=20)
+
+
+def NULL_PROGRESS(addrs=None, txes=None):
+    pass
 
 
 class Account:
@@ -34,7 +39,7 @@ class Account:
             raise ValueError(f"Unknown coin: {coin_name}") from e
 
         self.account_type = account_type
-        self.path = path
+        self.path = path or []
 
         if backend is None:
             self.backend = BlockbookBackend(coin_name)
@@ -45,6 +50,33 @@ class Account:
         self.addr_node = get_subnode(node, 0)
         self.change_node = get_subnode(node, 1)
         self.segwit = account_type is not ACCOUNT_TYPE_LEGACY
+
+    @classmethod
+    def from_xpub(cls, coin_name, xpubstr):
+        try:
+            coin = coins.by_name[coin_name]
+        except KeyError as e:
+            raise ValueError(f"Unknown coin: {coin_name}") from e
+
+        version, node = xpub.deserialize(xpubstr)
+        if node.private_key:
+            raise ValueError("Private key supplied, please use public key")
+
+        if version == coin["xpub_magic"]:
+            account_type = ACCOUNT_TYPE_LEGACY
+        elif version == coin["xpub_magic_segwit_p2sh"]:
+            account_type = ACCOUNT_TYPE_DEFAULT
+        elif version == coin["xpub_magic_segwit_native"]:
+            account_type = ACCOUNT_TYPE_SEGWIT
+        else:
+            raise ValueError("Unrecognized xpub magic (wrong coin maybe?)")
+
+        return cls(coin_name, node, account_type)
+
+    def _await(self, awaitable):
+        loop = asyncio.get_event_loop()
+        loop.set_default_executor(THREAD_POOL)
+        return loop.run_until_complete(awaitable)
 
     def _addresses(self, change=False):
         i = 0
@@ -58,19 +90,22 @@ class Account:
             yield Address(path, change, node.public_key, address_str)
             i += 1
 
-    def _address_data(self, change=False):
+    async def _address_data(self, change=False, all_txes=False):
         address_source = self._addresses(change)
         while True:
             chunk = [next(address_source) for _ in range(20)]
-            address_strs = [address.str for address in chunk]
-            data = THREAD_POOL.map(self.backend.get_address_data, address_strs)
-            for address, data in zip(chunk, data):
-                address.data = data
-            yield from chunk
+            loop = asyncio.get_event_loop()
+            address_data = [
+                loop.create_task(self.backend.get_address_data(addr.str, all_txes))
+                for addr in chunk
+            ]
+            for address, data in zip(chunk, address_data):
+                address.data = await data
+                yield address
 
-    def active_address_data(self, change=False):
+    async def active_address_data(self, change=False, all_txes=False):
         unused_counter = 0
-        for address in self._address_data(change):
+        async for address in self._address_data(change, all_txes):
             if address.data["totalReceived"] > 0:
                 unused_counter = 0
                 yield address
@@ -81,22 +116,46 @@ class Account:
                 break
 
     def get_unused_address(self, change=False):
-        for address in self._address_data(change):
-            if address.data["totalReceived"] == 0:
-                return address
+        async def do():
+            async for address in self._address_data(change):
+                if address.data["totalReceived"] == 0:
+                    return address
+
+        return self._await(do())
 
     def balance(self):
-        addresses = []
-        for change in (False, True):
-            addresses += self.active_address_data(change)
-        return sum(address.data["balance"] for address in addresses)
+        async def do():
+            balance = Decimal(0)
+            for change in (False, True):
+                async for addr in self.active_address_data(change):
+                    balance += addr.data["balance"]
+            return balance
 
-    def find_utxos(self):
-        # XXX interleave main/change?
-        for change in (False, True):
-            for address in self.active_address_data(change):
-                for utxo in self.backend.find_utxos(THREAD_POOL, address.data):
-                    yield (address, *utxo)
+        return self._await(do())
+
+    def find_utxos(self, progress=NULL_PROGRESS):
+        async def do():
+            utxos = []
+            addrs = 0
+            txes = 0
+
+            def local_progress():
+                nonlocal txes
+                txes += 1
+                progress(addrs=addrs, txes=txes)
+
+            # XXX interleave main/change?
+            for change in (False, True):
+                async for address in self.active_address_data(change, all_txes=True):
+                    addrs += 1
+                    progress(addrs=addrs, txes=txes)
+                    for utxo in await self.backend.get_utxos(
+                        address.data, progress=local_progress
+                    ):
+                        utxos.append((address, *utxo))
+            return utxos
+
+        return self._await(do())
 
     def estimate_fee(self):
         # TODO properly estimate fee

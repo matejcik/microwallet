@@ -16,7 +16,7 @@ class Address:
 
 
 def version_to_bytes(version):
-    vlen = (version.bit_length() + 7) // 8
+    vlen = max(1, (version.bit_length() + 7) // 8)
     return version.to_bytes(vlen, "little")
 
 
