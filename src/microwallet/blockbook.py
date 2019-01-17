@@ -4,8 +4,81 @@ import random
 from decimal import Decimal
 
 import aiohttp
+import websockets
 
 from trezorlib import coins, tx_api
+
+import ssl
+
+SSL_UNVERIFIED_CONTEXT = ssl.SSLContext()
+SSL_UNVERIFIED_CONTEXT.verify_mode = ssl.CERT_NONE
+
+DEV_BACKENDS = {
+    "Testnet": "wss://blockbook-dev.corp.sldev.cz:19130/websocket",
+    "Litecoin": "wss://blockbook-dev.corp.sldev.cz:9134/websocket",
+    "Zcash": "wss://blockbook-dev.corp.sldev.cz:9132/websocket",
+}
+
+
+class WebsocketBackend:
+    def __init__(self, coin_name, urls=None):
+        try:
+            self.coin = coins.by_name[coin_name]
+        except KeyError as e:
+            raise ValueError(f"Unknown coin: {coin_name}") from e
+
+        if urls is None:
+            # urls = self.coin["blockbook"]
+            urls = [DEV_BACKENDS[coin_name]]
+        if not urls:
+            raise ValueError("No backend URLs found")
+
+        self.url = random.choice(urls)
+        self.socket = None
+
+    async def fetch_json(self, method, **params):
+        if not self.socket:
+            self.socket = await websockets.connect(self.url, ssl=SSL_UNVERIFIED_CONTEXT)
+
+        pid = str(id(params))
+        packet = dict(id=pid, method=method, params=params)
+        packet_str = json.dumps(packet)
+        await self.socket.send(packet_str)
+        resp = await self.socket.recv()
+        data = json.loads(resp, parse_float=Decimal)
+        assert data["id"] == pid
+        return data["data"]
+
+    async def get_txdata(self, txhash):
+        return await self.fetch_json("getTransaction", txid=txhash)
+
+    async def get_address_data(self, address):
+        data = await self.fetch_json(
+            "getAccountInfo", descriptor=address, details="basic"
+        )
+        for key in ("balance", "totalReceived", "totalSent"):
+            if key in data:
+                data[key] = Decimal(data[key] or 0)
+        return data
+
+    async def get_utxos(self, address):
+        return await self.fetch_json("getAccountUtxo", descriptor=address)
+
+    async def estimate_fee(self, blocks):
+        est = await self.fetch_json("estimateFee", blocks=[blocks])
+        return est[0]["feePerUnit"]
+
+    async def close(self):
+        if self.socket:
+            await self.socket.close()
+            self.socket = None
+
+    async def broadcast(self, signed_tx_bytes):
+        result = await self.fetch_json("sendTransaction", hex=signed_tx_bytes.hex())
+        if "error" in result:
+            # TODO better handling
+            raise Exception(result["error"])
+        return result["result"]
 
 
 class BlockbookBackend:

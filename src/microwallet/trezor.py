@@ -1,10 +1,10 @@
 from trezorlib.transport import enumerate_devices, get_transport
 from trezorlib.client import TrezorClient
 from trezorlib.ui import ClickUI
-from trezorlib import coins, btc, tools, tx_api
+from trezorlib import coins, btc, tools
 from trezorlib.messages import SignTx, TxInputType, TxOutputType, OutputScriptType
 
-from . import account
+from . import account, tx_api
 
 SATOSHIS = account.SATOSHIS
 
@@ -59,14 +59,14 @@ def sign_tx(client, account, utxos, recipients, change):
             prev_index=prevout,
             sequence=0xFFFF_FFFD,
             script_type=account.account_type.input_script_type,
-            amount=int(amount * SATOSHIS),
+            amount=int(amount),
         )
         for address, tx, prevout, amount in utxos
     ]
     outputs = [
         TxOutputType(
             address=address,
-            amount=int(amount * SATOSHIS),
+            amount=int(amount),
             script_type=OutputScriptType.PAYTOADDRESS,
         )
         for address, amount in recipients

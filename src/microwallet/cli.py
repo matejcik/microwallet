@@ -7,7 +7,8 @@ import click
 from trezorlib import btc
 
 from . import account, account_type, trezor, exceptions
-from .blockbook import BlockbookBackend
+from .blockbook import BlockbookBackend, WebsocketBackend
+from .account import SATOSHIS
 
 
 class ChoiceType(click.Choice):
@@ -87,7 +88,10 @@ def main(ctx, coin_name, account_num, account_type, trezor_path, xpub, url):
         acc = account.Account.from_xpub(coin_name, xpub)
 
     if url:
-        acc.backend = BlockbookBackend(coin_name, urls=[url])
+        if url.startswith("wss:"):
+            acc.backend = WebsocketBackend(coin_name, urls=[url])
+        else:
+            acc.backend = BlockbookBackend(coin_name, urls=[url])
     ctx.obj = client, acc
 
 
@@ -109,12 +113,14 @@ def show(obj, utxo):
     if utxo:
         total = Decimal(0)
         for address, tx, vout, value in account.find_utxos(progress=progress):
-            click.echo(f"{address.str}: {tx['txid']}:{vout} - {value} {symbol}")
+            val_out = value / SATOSHIS
+            click.echo(f"{address.str}: {tx['txid']}:{vout} - {val_out:f} {symbol}")
             total += value
-        print("\r\033[K")
+        click.echo("\r\033[K", nl=False)
     else:
         total = account.balance()
-    click.echo(f"Balance: {total} {symbol}")
+    total /= SATOSHIS
+    click.echo(f"Balance: {total:f} {symbol}")
 
 
 @main.command()
@@ -133,10 +139,11 @@ def receive(obj, show):
 # fmt: off
 @click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
 @click.option("-n", "--dry-run", is_flag=True, help="Do not sign with Trezor")
+@click.option("-b", "--no-broadcast", is_flag=True, help="Do not broadcast signed transaction")
 # fmt: on
 @click.argument("address")
 @click.argument("amount", type=Decimal)
-def send(obj, address, amount, verbose, dry_run):
+def send(obj, address, amount, verbose, dry_run, no_broadcast):
     client, account = obj
     try:
         recipients = [(address, amount)]
@@ -145,17 +152,23 @@ def send(obj, address, amount, verbose, dry_run):
             symbol = account.coin["shortcut"]
             click.echo("Spending from:")
             total_in = Decimal(0)
-            total_out = amount + Decimal(change) / Decimal(1e8)
+            total_out = amount + Decimal(change)
             for _, tx, prevout, amount in utxos:
-                click.echo(f"{tx['txid']}:{prevout} - {amount} {symbol}")
+                am_out = amount / SATOSHIS
+                click.echo(f"{tx['txid']}:{prevout} - {am_out:f} {symbol}")
                 total_in += amount
             fee_rate = account.estimate_fee()
             actual_fee = total_in - total_out
-            click.echo(f"Fee: {actual_fee} {symbol} (at {fee_rate} sat/KB)")
+            fee_out = actual_fee / SATOSHIS
+            click.echo(f"Fee: {fee_out:f} {symbol} (at {fee_rate} sat/KB)")
 
         if client and not dry_run:
             _, signed_tx = trezor.sign_tx(client, account, utxos, recipients, change)
-            print(signed_tx.hex())
+            if verbose:
+                click.echo("Signed transaction hex:")
+                click.echo(signed_tx.hex())
+            if not no_broadcast:
+                account.broadcast(signed_tx)
 
     except exceptions.InsufficientFunds:
         die("Insufficient funds")

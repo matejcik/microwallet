@@ -11,7 +11,7 @@ from trezorlib import coins, tools
 from trezorlib.messages import InputScriptType, OutputScriptType
 from trezorlib.ckd_public import public_ckd, get_subnode
 
-from .blockbook import BlockbookBackend
+from .blockbook import WebsocketBackend
 from .formats import transaction, xpub
 from . import exceptions
 from .address import Address, derive_output_script
@@ -37,12 +37,13 @@ class Account:
             self.coin = coins.by_name[coin_name]
         except KeyError as e:
             raise ValueError(f"Unknown coin: {coin_name}") from e
+        self.decimals = SATOSHIS
 
         self.account_type = account_type
         self.path = path or []
 
         if backend is None:
-            self.backend = BlockbookBackend(coin_name)
+            self.backend = WebsocketBackend(coin_name)
         else:
             self.backend = backend
 
@@ -90,22 +91,14 @@ class Account:
             yield Address(path, change, node.public_key, address_str)
             i += 1
 
-    async def _address_data(self, change=False, all_txes=False):
-        address_source = self._addresses(change)
-        while True:
-            chunk = [next(address_source) for _ in range(20)]
-            loop = asyncio.get_event_loop()
-            address_data = [
-                loop.create_task(self.backend.get_address_data(addr.str, all_txes))
-                for addr in chunk
-            ]
-            for address, data in zip(chunk, address_data):
-                address.data = await data
-                yield address
+    async def _address_data(self, change=False):
+        for address in self._addresses(change):
+            address.data = await self.backend.get_address_data(address.str)
+            yield address
 
-    async def active_address_data(self, change=False, all_txes=False):
+    async def active_address_data(self, change=False):
         unused_counter = 0
-        async for address in self._address_data(change, all_txes):
+        async for address in self._address_data(change):
             if address.data["totalReceived"] > 0:
                 unused_counter = 0
                 yield address
@@ -135,43 +128,42 @@ class Account:
 
     def find_utxos(self, progress=NULL_PROGRESS):
         async def do():
-            utxos = []
+            result = []
             addrs = 0
             txes = 0
 
-            def local_progress():
-                nonlocal txes
-                txes += 1
-                progress(addrs=addrs, txes=txes)
-
             # XXX interleave main/change?
             for change in (False, True):
-                async for address in self.active_address_data(change, all_txes=True):
+                async for address in self.active_address_data(change):
+                    utxos = await self.backend.get_utxos(address.str)
                     addrs += 1
                     progress(addrs=addrs, txes=txes)
-                    for utxo in await self.backend.get_utxos(
-                        address.data, progress=local_progress
-                    ):
-                        utxos.append((address, *utxo))
-            return utxos
+                    for utxo in utxos:
+                        txdata = await self.backend.get_txdata(utxo["txid"])
+                        result.append(
+                            (address, txdata, utxo["vout"], Decimal(utxo["value"]))
+                        )
+                        txes += 1
+                        progress(addrs=addrs, txes=txes)
+            return result
 
         return self._await(do())
 
     def estimate_fee(self):
         # TODO properly estimate fee
         try:
-            result = int(self.backend.estimate_fee(5) * SATOSHIS)
+            backend_estimate = self._await(self.backend.estimate_fee(5))
+            result = int(backend_estimate)
             if result > 0:
                 return result
         except Exception as e:
             print(e)
-
-        return int(self.coin["default_fee_b"]["Normal"]) * 1024
+            return int(self.coin["default_fee_b"]["Normal"]) * 1000
 
     def fund_tx(self, recipients):
         utxos = []
         total = 0
-        required = int(sum(amount for _, amount in recipients) * SATOSHIS)
+        required = int(sum(amount for _, amount in recipients))
         fee_rate_kb = self.estimate_fee()
 
         inputs = []
@@ -200,7 +192,7 @@ class Account:
         for utxo in self.find_utxos():
             utxos.append(utxo)
             _, _, _, amount = utxo
-            total += int(amount * SATOSHIS)
+            total += int(amount)
             inp, wit = self._make_input(*utxo)
             inputs.append(inp)
             witness.append(wit)
@@ -234,7 +226,7 @@ class Account:
             total_tx = len(transaction.Transaction.build(tx_data))
             tx_len = (base_tx * 3 + total_tx) // 4
 
-        return tx_len * fee_rate_kb // 1024
+        return tx_len * fee_rate_kb // 1000
 
     def _make_input(self, address, prevtx, prevout, _):
         fake_sig = b"\0" * 71
@@ -248,4 +240,7 @@ class Account:
             ),
             witness,
         )
+
+    def broadcast(self, signed_tx_bytes):
+        return self._await(self.backend.broadcast(signed_tx_bytes))
 
