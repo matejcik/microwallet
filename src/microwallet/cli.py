@@ -168,7 +168,10 @@ def send(obj, address, amount, verbose, dry_run, no_broadcast):
                 click.echo("Signed transaction hex:")
                 click.echo(signed_tx.hex())
             if not no_broadcast:
-                account.broadcast(signed_tx)
+                txhex = account.broadcast(signed_tx)
+                click.echo(f"Transaction {txhex} broadcast successfully")
+            else:
+                click.echo("Transaction not broadcast")
 
     except exceptions.InsufficientFunds:
         die("Insufficient funds")
