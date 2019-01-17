@@ -57,7 +57,7 @@ def _json_to_input(coin, vin):
         i.prev_hash = bytes.fromhex(vin["txid"])
         i.prev_index = vin["n"]
 
-    i.script_sig = bytes.fromhex(vin["hex"])
+    i.script_sig = bytes.fromhex(vin.get("hex", ""))
     i.sequence = vin["sequence"]
 
     if coin["decred"]:
