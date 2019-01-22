@@ -21,8 +21,6 @@ from .account_type import ACCOUNT_TYPE_LEGACY, ACCOUNT_TYPE_DEFAULT, ACCOUNT_TYP
 RBF_SEQUENCE_NUMBER = 0xFFFF_FFFD
 SATOSHIS = Decimal(1e8)
 
-THREAD_POOL = ThreadPoolExecutor(max_workers=20)
-
 
 def NULL_PROGRESS(addrs=None, txes=None):
     pass
@@ -76,10 +74,9 @@ class Account:
 
     def _await(self, awaitable):
         loop = asyncio.get_event_loop()
-        loop.set_default_executor(THREAD_POOL)
         return loop.run_until_complete(awaitable)
 
-    def _addresses(self, change=False):
+    def addresses(self, change=False):
         i = 0
         master_node = self.addr_node if not change else self.change_node
         address_version = self.coin[self.account_type.address_version_field]
@@ -92,9 +89,25 @@ class Account:
             i += 1
 
     async def _address_data(self, change=False):
-        for address in self._addresses(change):
-            address.data = await self.backend.get_address_data(address.str)
-            yield address
+        addr_iter = self.addresses(change)
+        while True:
+            chunk = []
+            try:
+                for _ in range(20):
+                    chunk.append(next(addr_iter))
+            except StopIteration:
+                pass
+            if not chunk:
+                return
+
+            batch = [
+                asyncio.ensure_future(self.backend.get_address_data(a.str))
+                for a in chunk
+            ]
+            # await asyncio.wait(batch)
+            for address, data in zip(chunk, batch):
+                address.data = await data
+                yield address
 
     async def active_address_data(self, change=False):
         unused_counter = 0
@@ -183,7 +196,9 @@ class Account:
             lock_time=0,
         )
 
-        change_address = next(self._addresses(change=True))
+        # pick any address, this will not actually be used in the transaction
+        change_address = next(self.addresses(change=True))
+
         change_script = derive_output_script(self.coin, change_address.str)
         change_output = dict(value=0, script_pubkey=change_script)
         tx_data_with_change = tx_data.copy()

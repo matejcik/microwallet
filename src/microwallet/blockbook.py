@@ -14,9 +14,11 @@ SSL_UNVERIFIED_CONTEXT = ssl.SSLContext()
 SSL_UNVERIFIED_CONTEXT.verify_mode = ssl.CERT_NONE
 
 DEV_BACKENDS = {
+    "Bitcoin": "wss://blockbook-dev.corp.sldev.cz:9130/websocket",
     "Testnet": "wss://blockbook-dev.corp.sldev.cz:19130/websocket",
     "Litecoin": "wss://blockbook-dev.corp.sldev.cz:9134/websocket",
     "Zcash": "wss://blockbook-dev.corp.sldev.cz:9132/websocket",
+    "Dogecoin": "wss://blockbook-dev.corp.sldev.cz:9138/websocket",
 }
 
 
@@ -36,17 +38,38 @@ class WebsocketBackend:
         self.url = random.choice(urls)
         self.socket = None
 
+        self._ws_response_cache = {}
+
+    def _resume_by_id(self, fut):
+        response = fut.result()
+        data = json.loads(response, parse_float=Decimal)
+        to_resume = self._ws_response_cache.pop(data["id"])
+        to_resume.set_result(data)
+
     async def fetch_json(self, method, **params):
         if not self.socket:
             self.socket = await websockets.connect(self.url, ssl=SSL_UNVERIFIED_CONTEXT)
 
-        pid = str(id(params))
-        packet = dict(id=pid, method=method, params=params)
+        # prepare a Future that will resume when *our* response comes
+        fut = asyncio.Future()
+        request_id = str(id(fut))
+        self._ws_response_cache[request_id] = fut
+
+        # send a request packet
+        packet = dict(id=request_id, method=method, params=params)
         packet_str = json.dumps(packet)
         await self.socket.send(packet_str)
-        resp = await self.socket.recv()
-        data = json.loads(resp, parse_float=Decimal)
-        assert data["id"] == pid
+
+        # install a callback for response
+        resp_fut = asyncio.ensure_future(self.socket.recv())
+        resp_fut.add_done_callback(self._resume_by_id)
+
+        # await data coming from our future
+        data = await fut
+        assert data["id"] == request_id
+        if "error" in data["data"]:
+            # TODO custom exception handling
+            raise Exception(data["data"]["error"]["message"])
         return data["data"]
 
     async def get_txdata(self, txhash):

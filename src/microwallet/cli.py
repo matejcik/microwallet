@@ -178,4 +178,4 @@ def send(obj, address, amount, verbose, dry_run, no_broadcast):
 
 
 if __name__ == "__main__":
-    sys.exit(main())  # pragma: no cover
+    sys.exit(main())  # pragma: no cover; pylint: disable=E1120
