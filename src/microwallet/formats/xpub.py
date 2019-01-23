@@ -42,4 +42,5 @@ def serialize(version, node):
         data["key"] = b"\0" + node.private_key
     else:
         data["key"] = node.public_key
-    return XpubStruct.build(data)
+    xpub_bytes = XpubStruct.build(data)
+    return b58check_encode(xpub_bytes)
