@@ -17,7 +17,7 @@ class Address:
 
 def version_to_bytes(version):
     vlen = max(1, (version.bit_length() + 7) // 8)
-    return version.to_bytes(vlen, "little")
+    return version.to_bytes(vlen, "big")
 
 
 def address_p2pkh(version, pubkey):
@@ -37,7 +37,10 @@ def address_p2sh_p2wpkh(version, pubkey):
 
 
 def address_p2wpkh(version, pubkey):
-    pass
+    assert pubkey[0] != 4, "uncompressed pubkey"
+    witver = 0
+    witprog = hash_160(pubkey)
+    return bech32.encode(version, witver, witprog)
 
 
 def script_sig_p2pkh(address, signature):
