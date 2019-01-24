@@ -51,7 +51,7 @@ class Account:
         self.segwit = account_type is not ACCOUNT_TYPE_LEGACY
 
     @classmethod
-    def from_xpub(cls, coin_name, xpubstr):
+    def from_xpub(cls, coin_name, xpubstr, **kwargs):
         try:
             coin = coins.by_name[coin_name]
         except KeyError as e:
@@ -70,7 +70,7 @@ class Account:
         else:
             raise ValueError("Unrecognized xpub magic (wrong coin maybe?)")
 
-        return cls(coin_name, node, account_type)
+        return cls(coin_name, node, account_type, **kwargs)
 
     def _await(self, awaitable):
         loop = asyncio.get_event_loop()
