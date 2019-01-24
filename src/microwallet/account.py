@@ -21,6 +21,8 @@ from .account_type import ACCOUNT_TYPE_LEGACY, ACCOUNT_TYPE_DEFAULT, ACCOUNT_TYP
 RBF_SEQUENCE_NUMBER = 0xFFFF_FFFD
 SATOSHIS = Decimal(1e8)
 
+BIP32_ADDRESS_DISCOVERY_LIMIT = 20
+
 
 def NULL_PROGRESS(addrs=None, txes=None):
     pass
@@ -118,7 +120,7 @@ class Account:
             else:
                 unused_counter += 1
 
-            if unused_counter > 20:
+            if unused_counter > BIP32_ADDRESS_DISCOVERY_LIMIT:
                 break
 
     def get_unused_address(self, change=False):

@@ -1,3 +1,4 @@
+import asyncio
 import itertools
 import typing
 from unittest.mock import Mock
@@ -6,7 +7,7 @@ import attr
 import pytest
 
 from microwallet import account_type
-from microwallet.account import Account
+from microwallet.account import Account, BIP32_ADDRESS_DISCOVERY_LIMIT
 from microwallet.formats import xpub
 
 
@@ -98,15 +99,6 @@ VECTORS = [
 ]
 
 
-def account_for_vector(vector):
-    return Account.from_xpub(vector.coin_name, vector.xpub)
-
-
-@pytest.fixture(params=VECTORS)
-def account(request):
-    return account_for_vector(request.param)
-
-
 @pytest.mark.parametrize("vector", VECTORS)
 def test_from_xpub(vector):
     account = Account.from_xpub(vector.coin_name, vector.xpub)
@@ -117,13 +109,61 @@ def test_from_xpub(vector):
 
 @pytest.mark.parametrize("vector", VECTORS)
 def test_addresses(vector):
-    account = account_for_vector(vector)
+    account = Account.from_xpub(vector.coin_name, vector.xpub)
     n = len(vector.addresses)
     generated = itertools.islice(account.addresses(), n)
-    for expected, address in zip(vector.addresses, generated):
+    for i, expected, address in zip(range(n), vector.addresses, generated):
         assert address.str == expected
+        assert address.path == [0, i]
 
     n = len(vector.change)
     generated = itertools.islice(account.addresses(change=True), n)
-    for expected, address in zip(vector.change, generated):
+    for i, expected, address in zip(range(n), vector.change, generated):
         assert address.str == expected
+        assert address.path == [1, i]
+
+
+def test_unused_address():
+    vector = VECTORS[0]
+    backend = Mock()
+    account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
+
+    async def empty_address(addr):
+        return {"addressStr": addr, "totalReceived": 0}
+
+    backend.get_address_data = empty_address
+    assert account.get_unused_address().str == vector.addresses[0]
+
+    counter = 0
+
+    async def first_three_not_empty(addr):
+        nonlocal counter
+        total = 100 if counter < 3 else 0
+        counter += 1
+        return {"addressStr": addr, "totalReceived": total}
+
+    backend.get_address_data = first_three_not_empty
+    assert account.get_unused_address().str == vector.addresses[3]
+
+
+@pytest.mark.xfail
+def test_active_addresses():
+    # TODO: active_address_data is asyncgenerator
+    vector = VECTORS[0]
+    backend = Mock()
+    account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
+    counter = 0
+    ACTIVE_ADDRESSES = 3
+
+    async def mock_address_data(addr):
+        nonlocal counter
+        total = 100 if counter < ACTIVE_ADDRESSES else 0
+        counter += 1
+        return {"addressStr": addr, "totalReceived": total}
+
+    backend.get_address_data = mock_address_data
+    active_addresses = list(account.active_address_data())
+
+    assert len(active_addresses) == ACTIVE_ADDRESSES
+    assert counter > BIP32_ADDRESS_DISCOVERY_LIMIT
+
