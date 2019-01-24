@@ -8,3 +8,4 @@ twine
 
 pytest
 black
+pytest-asyncio

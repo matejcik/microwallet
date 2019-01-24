@@ -146,8 +146,8 @@ def test_unused_address():
     assert account.get_unused_address().str == vector.addresses[3]
 
 
-@pytest.mark.xfail
-def test_active_addresses():
+@pytest.mark.asyncio
+async def test_active_addresses():
     # TODO: active_address_data is asyncgenerator
     vector = VECTORS[0]
     backend = Mock()
@@ -162,7 +162,7 @@ def test_active_addresses():
         return {"addressStr": addr, "totalReceived": total}
 
     backend.get_address_data = mock_address_data
-    active_addresses = list(account.active_address_data())
+    active_addresses = [a async for a in account.active_address_data()]
 
     assert len(active_addresses) == ACTIVE_ADDRESSES
     assert counter > BIP32_ADDRESS_DISCOVERY_LIMIT
