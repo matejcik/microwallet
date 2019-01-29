@@ -148,7 +148,6 @@ def test_unused_address():
 
 @pytest.mark.asyncio
 async def test_active_addresses():
-    # TODO: active_address_data is asyncgenerator
     vector = VECTORS[0]
     backend = Mock()
     account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)

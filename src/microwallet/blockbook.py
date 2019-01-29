@@ -37,6 +37,7 @@ class WebsocketBackend:
 
         self.url = random.choice(urls)
         self.socket = None
+        self.connect_lock = asyncio.Lock()
 
         self._ws_response_cache = {}
 
@@ -46,26 +47,44 @@ class WebsocketBackend:
         to_resume = self._ws_response_cache.pop(data["id"])
         to_resume.set_result(data)
 
+    def _await_response(self, request_id, fut):
+        self._ws_response_cache[request_id] = fut
+        if len(self._ws_response_cache) == 1:
+
+            def get_response():
+                fut = asyncio.ensure_future(self.socket.recv())
+                fut.add_done_callback(resume_by_id)
+
+            def resume_by_id(fut):
+                response = fut.result()
+                data = json.loads(response, parse_float=Decimal)
+                to_resume = self._ws_response_cache.pop(data["id"])
+                to_resume.set_result(data)
+                if self._ws_response_cache:
+                    get_response()
+
+            get_response()
+
+        return fut
+
     async def fetch_json(self, method, **params):
-        if not self.socket:
-            self.socket = await websockets.connect(self.url, ssl=SSL_UNVERIFIED_CONTEXT)
+        async with self.connect_lock:
+            if not self.socket:
+                self.socket = await websockets.connect(
+                    self.url, ssl=SSL_UNVERIFIED_CONTEXT
+                )
 
         # prepare a Future that will resume when *our* response comes
         fut = asyncio.Future()
         request_id = str(id(fut))
-        self._ws_response_cache[request_id] = fut
 
         # send a request packet
         packet = dict(id=request_id, method=method, params=params)
         packet_str = json.dumps(packet)
         await self.socket.send(packet_str)
 
-        # install a callback for response
-        resp_fut = asyncio.ensure_future(self.socket.recv())
-        resp_fut.add_done_callback(self._resume_by_id)
-
         # await data coming from our future
-        data = await fut
+        data = await self._await_response(request_id, fut)
         assert data["id"] == request_id
         if "error" in data["data"]:
             # TODO custom exception handling
