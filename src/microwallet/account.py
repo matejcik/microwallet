@@ -4,6 +4,7 @@ from enum import Enum
 import functools
 import typing
 from concurrent.futures import ThreadPoolExecutor
+import inspect
 
 import attr
 
@@ -26,6 +27,23 @@ BIP32_ADDRESS_DISCOVERY_LIMIT = 20
 
 def NULL_PROGRESS(addrs=None, txes=None):
     pass
+
+
+def require_backend(func):
+    @functools.wraps(func)
+    async def run_normal(self, *args, **kwargs):
+        async with self.backend:
+            return await func(self, *args, **kwargs)
+
+    async def run_generator(self, *args, **kwargs):
+        async with self.backend:
+            async for x in func(self, *args, **kwargs):
+                yield x
+
+    if inspect.isasyncgenfunction(func):
+        return run_generator
+    else:
+        return run_normal
 
 
 class Account:
@@ -74,10 +92,6 @@ class Account:
 
         return cls(coin_name, node, account_type, **kwargs)
 
-    def _await(self, awaitable):
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(awaitable)
-
     def addresses(self, change=False):
         i = 0
         master_node = self.addr_node if not change else self.change_node
@@ -90,6 +104,7 @@ class Account:
             yield Address(path, change, node.public_key, address_str)
             i += 1
 
+    @require_backend
     async def _address_data(self, change=False):
         addr_iter = self.addresses(change)
         while True:
@@ -123,51 +138,40 @@ class Account:
             if unused_counter > BIP32_ADDRESS_DISCOVERY_LIMIT:
                 break
 
-    def get_unused_address(self, change=False):
-        async def do():
-            async for address in self._address_data(change):
-                if address.data["totalReceived"] == 0:
-                    return address
+    async def get_unused_address(self, change=False):
+        async for address in self._address_data(change):
+            if address.data["totalReceived"] == 0:
+                return address
 
-        return self._await(do())
+    async def balance(self):
+        balance = Decimal(0)
+        for change in (False, True):
+            async for addr in self.active_address_data(change):
+                balance += addr.data["balance"]
+        return balance
 
-    def balance(self):
-        async def do():
-            balance = Decimal(0)
-            for change in (False, True):
-                async for addr in self.active_address_data(change):
-                    balance += addr.data["balance"]
-            return balance
+    @require_backend
+    async def find_utxos(self, progress=NULL_PROGRESS):
+        addrs = 0
+        txes = 0
 
-        return self._await(do())
-
-    def find_utxos(self, progress=NULL_PROGRESS):
-        async def do():
-            result = []
-            addrs = 0
-            txes = 0
-
-            # XXX interleave main/change?
-            for change in (False, True):
-                async for address in self.active_address_data(change):
-                    utxos = await self.backend.get_utxos(address.str)
-                    addrs += 1
+        # XXX interleave main/change?
+        for change in (False, True):
+            async for address in self.active_address_data(change):
+                utxos = await self.backend.get_utxos(address.str)
+                addrs += 1
+                progress(addrs=addrs, txes=txes)
+                for utxo in utxos:
+                    txdata = await self.backend.get_txdata(utxo["txid"])
+                    yield address, txdata, utxo["vout"], Decimal(utxo["value"])
+                    txes += 1
                     progress(addrs=addrs, txes=txes)
-                    for utxo in utxos:
-                        txdata = await self.backend.get_txdata(utxo["txid"])
-                        result.append(
-                            (address, txdata, utxo["vout"], Decimal(utxo["value"]))
-                        )
-                        txes += 1
-                        progress(addrs=addrs, txes=txes)
-            return result
 
-        return self._await(do())
-
-    def estimate_fee(self):
+    @require_backend
+    async def estimate_fee(self):
         # TODO properly estimate fee
         try:
-            backend_estimate = self._await(self.backend.estimate_fee(5))
+            backend_estimate = await self.backend.estimate_fee(5)
             result = int(backend_estimate)
             if result > 0:
                 return result
@@ -175,7 +179,7 @@ class Account:
             print(e)
             return int(self.coin["default_fee_b"]["Normal"]) * 1000
 
-    def fund_tx(self, recipients):
+    async def fund_tx(self, recipients):
         utxos = []
         total = 0
         required = int(sum(amount for _, amount in recipients))
@@ -206,7 +210,7 @@ class Account:
         tx_data_with_change = tx_data.copy()
         tx_data_with_change["outputs"] = outputs[:] + [change_output]
 
-        for utxo in self.find_utxos():
+        async for utxo in self.find_utxos():
             utxos.append(utxo)
             _, _, _, amount = utxo
             total += int(amount)
@@ -258,6 +262,6 @@ class Account:
             witness,
         )
 
-    def broadcast(self, signed_tx_bytes):
-        return self._await(self.backend.broadcast(signed_tx_bytes))
-
+    @require_backend
+    async def broadcast(self, signed_tx_bytes):
+        return await self.backend.broadcast(signed_tx_bytes)

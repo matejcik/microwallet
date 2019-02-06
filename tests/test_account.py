@@ -1,10 +1,10 @@
 import asyncio
 import itertools
 import typing
-from unittest.mock import Mock
 
 import attr
 import pytest
+from asynctest import MagicMock, patch
 
 from microwallet import account_type
 from microwallet.account import Account, BIP32_ADDRESS_DISCOVERY_LIMIT
@@ -123,16 +123,17 @@ def test_addresses(vector):
         assert address.path == [1, i]
 
 
-def test_unused_address():
+@pytest.mark.asyncio
+async def test_unused_address():
     vector = VECTORS[0]
-    backend = Mock()
+    backend = MagicMock()
     account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
 
     async def empty_address(addr):
         return {"addressStr": addr, "totalReceived": 0}
 
     backend.get_address_data = empty_address
-    assert account.get_unused_address().str == vector.addresses[0]
+    assert (await account.get_unused_address()).str == vector.addresses[0]
 
     counter = 0
 
@@ -143,13 +144,13 @@ def test_unused_address():
         return {"addressStr": addr, "totalReceived": total}
 
     backend.get_address_data = first_three_not_empty
-    assert account.get_unused_address().str == vector.addresses[3]
+    assert (await account.get_unused_address()).str == vector.addresses[3]
 
 
 @pytest.mark.asyncio
 async def test_active_addresses():
     vector = VECTORS[0]
-    backend = Mock()
+    backend = MagicMock()
     account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
     counter = 0
     ACTIVE_ADDRESSES = 3

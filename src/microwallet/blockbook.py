@@ -2,6 +2,7 @@ import asyncio
 import json
 import random
 from decimal import Decimal
+import logging
 
 import aiohttp
 import websockets
@@ -21,6 +22,8 @@ DEV_BACKENDS = {
     "Dogecoin": "wss://blockbook-dev.corp.sldev.cz:9138/websocket",
 }
 
+LOG = logging.getLogger(__name__)
+
 
 class WebsocketBackend:
     def __init__(self, coin_name, urls=None):
@@ -37,55 +40,73 @@ class WebsocketBackend:
 
         self.url = random.choice(urls)
         self.socket = None
-        self.connect_lock = asyncio.Lock()
+        self._responder = None
+        self._ws_response_cache = {}
+        self._connections = 0
 
+    async def __aenter__(self):
+        if self._connections > 0:
+            self._connections += 1
+            return self
+
+        self._connections += 1
+        self.socket = await websockets.connect(self.url, ssl=SSL_UNVERIFIED_CONTEXT)
         self._ws_response_cache = {}
 
-    def _resume_by_id(self, fut):
-        response = fut.result()
-        data = json.loads(response, parse_float=Decimal)
-        to_resume = self._ws_response_cache.pop(data["id"])
-        to_resume.set_result(data)
+        # utility subroutines
+        def run_responder():
+            """Call next recv() and assign callback"""
+            self._responder = asyncio.ensure_future(self.socket.recv())
+            self._responder.add_done_callback(responder_func)
 
-    def _await_response(self, request_id, fut):
-        self._ws_response_cache[request_id] = fut
-        if len(self._ws_response_cache) == 1:
-
-            def get_response():
-                fut = asyncio.ensure_future(self.socket.recv())
-                fut.add_done_callback(resume_by_id)
-
-            def resume_by_id(fut):
+        def responder_func(fut):
+            """Callback. Process WS response and resume the appropriate id."""
+            if fut.cancelled():
+                self._responder = None
+            try:
                 response = fut.result()
                 data = json.loads(response, parse_float=Decimal)
                 to_resume = self._ws_response_cache.pop(data["id"])
                 to_resume.set_result(data)
-                if self._ws_response_cache:
-                    get_response()
+            except Exception as e:
+                LOG.error(f"Exception when reading websocket: {e}")
 
-            get_response()
+            run_responder()
 
-        return fut
+        run_responder()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._connections == 0:
+            return
+        elif self._connections == 1:
+            self._responder.cancel()
+            await self.socket.close()
+            self.socket = None
+            for fut in self._ws_response_cache.values():
+                fut.set_exception(RuntimeError("Connection was closed"))
+            self._ws_response_cache = {}
+            self._connections = 0
+        else:
+            self._connections -= 1
 
     async def fetch_json(self, method, **params):
-        async with self.connect_lock:
-            if not self.socket:
-                self.socket = await websockets.connect(
-                    self.url, ssl=SSL_UNVERIFIED_CONTEXT
-                )
+        if not self.socket:
+            raise RuntimeError("Backend not connected")
 
-        # prepare a Future that will resume when *our* response comes
+        # prepare a Future that will resume when *our* response comes,
+        # insert reference into response cache
         fut = asyncio.Future()
         request_id = str(id(fut))
+        self._ws_response_cache[request_id] = fut
 
         # send a request packet
         packet = dict(id=request_id, method=method, params=params)
         packet_str = json.dumps(packet)
         await self.socket.send(packet_str)
 
-        # await data coming from our future
-        data = await self._await_response(request_id, fut)
-        assert data["id"] == request_id
+        # await resumption when our response arrives
+        data = await fut
         if "error" in data["data"]:
             # TODO custom exception handling
             raise Exception(data["data"]["error"]["message"])

@@ -2,6 +2,8 @@
 import os
 import sys
 from decimal import Decimal
+import asyncio
+import functools
 
 import click
 from trezorlib import btc
@@ -95,6 +97,19 @@ def main(ctx, coin_name, account_num, account_type, trezor_path, xpub, url):
     ctx.obj = client, acc
 
 
+def async_command(func):
+    @click.command(name=func.__name__)
+    @click.pass_obj
+    @functools.wraps(func)
+    def wrapper(obj, *args, **kwargs):
+        loop = asyncio.get_event_loop()
+        fut = asyncio.ensure_future(func(obj, *args, **kwargs))
+        return loop.run_until_complete(fut)
+
+    main.add_command(wrapper)
+    return wrapper
+
+
 def progress(addrs=None, txes=None):
     out = []
     if addrs is not None:
@@ -104,27 +119,25 @@ def progress(addrs=None, txes=None):
     click.echo("\033[KLoading, " + ", ".join(out) + "...\r", nl=False)
 
 
-@main.command()
-@click.pass_obj
+@async_command
 @click.option("-u", "--utxo", is_flag=True, help="Show individual UTXOs")
-def show(obj, utxo):
+async def show(obj, utxo):
     _, account = obj
     symbol = account.coin["shortcut"]
     if utxo:
         total = Decimal(0)
-        for address, tx, vout, value in account.find_utxos(progress=progress):
+        async for address, tx, vout, value in account.find_utxos(progress=progress):
             val_out = value / SATOSHIS
             click.echo(f"{address.str}: {tx['txid']}:{vout} - {val_out:f} {symbol}")
             total += value
         click.echo("\r\033[K", nl=False)
     else:
-        total = account.balance()
+        total = await account.balance()
     total /= SATOSHIS
     click.echo(f"Balance: {total:f} {symbol}")
 
 
-@main.command()
-@click.pass_obj
+@async_command
 @click.option("-s/-S", "--show/--no-show", help="Display address on Trezor")
 def receive(obj, show):
     client, account = obj
@@ -134,8 +147,7 @@ def receive(obj, show):
         trezor.show_address(client, account, address)
 
 
-@main.command()
-@click.pass_obj
+@async_command
 # fmt: off
 @click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
 @click.option("-n", "--dry-run", is_flag=True, help="Do not sign with Trezor")
