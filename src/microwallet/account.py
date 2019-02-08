@@ -25,6 +25,14 @@ SATOSHIS = Decimal(1e8)
 BIP32_ADDRESS_DISCOVERY_LIMIT = 20
 
 
+@attr.s(auto_attribs=True)
+class Utxo:
+    address: Address
+    tx: typing.Dict[str, typing.Any]
+    vout: int
+    value: Decimal
+
+
 def NULL_PROGRESS(addrs=None, txes=None):
     pass
 
@@ -35,6 +43,7 @@ def require_backend(func):
         async with self.backend:
             return await func(self, *args, **kwargs)
 
+    @functools.wraps(func)
     async def run_generator(self, *args, **kwargs):
         async with self.backend:
             async for x in func(self, *args, **kwargs):
@@ -163,7 +172,12 @@ class Account:
                 progress(addrs=addrs, txes=txes)
                 for utxo in utxos:
                     txdata = await self.backend.get_txdata(utxo["txid"])
-                    yield address, txdata, utxo["vout"], Decimal(utxo["value"])
+                    yield Utxo(
+                        address=address,
+                        tx=txdata,
+                        vout=int(utxo["vout"]),
+                        value=Decimal(utxo["value"]),
+                    )
                     txes += 1
                     progress(addrs=addrs, txes=txes)
 
@@ -209,6 +223,9 @@ class Account:
         change_output = dict(value=0, script_pubkey=change_script)
         tx_data_with_change = tx_data.copy()
         tx_data_with_change["outputs"] = outputs[:] + [change_output]
+
+        utxos = [u async for u in self.find_utxos()]
+        utxos.sort()
 
         async for utxo in self.find_utxos():
             utxos.append(utxo)

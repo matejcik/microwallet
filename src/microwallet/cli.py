@@ -139,9 +139,9 @@ async def show(obj, utxo):
 
 @async_command
 @click.option("-s/-S", "--show/--no-show", help="Display address on Trezor")
-def receive(obj, show):
+async def receive(obj, show):
     client, account = obj
-    address = account.get_unused_address()
+    address = await account.get_unused_address()
     click.echo(address.str)
     if client and show:
         trezor.show_address(client, account, address)
@@ -155,11 +155,11 @@ def receive(obj, show):
 # fmt: on
 @click.argument("address")
 @click.argument("amount", type=Decimal)
-def send(obj, address, amount, verbose, dry_run, no_broadcast):
+async def send(obj, address, amount, verbose, dry_run, no_broadcast):
     client, account = obj
     try:
         recipients = [(address, amount)]
-        utxos, change = account.fund_tx(recipients)
+        utxos, change = await account.fund_tx(recipients)
         if verbose:
             symbol = account.coin["shortcut"]
             click.echo("Spending from:")
@@ -169,7 +169,7 @@ def send(obj, address, amount, verbose, dry_run, no_broadcast):
                 am_out = amount / SATOSHIS
                 click.echo(f"{tx['txid']}:{prevout} - {am_out:f} {symbol}")
                 total_in += amount
-            fee_rate = account.estimate_fee()
+            fee_rate = await account.estimate_fee()
             actual_fee = total_in - total_out
             fee_out = actual_fee / SATOSHIS
             click.echo(f"Fee: {fee_out:f} {symbol} (at {fee_rate} sat/KB)")
@@ -180,7 +180,7 @@ def send(obj, address, amount, verbose, dry_run, no_broadcast):
                 click.echo("Signed transaction hex:")
                 click.echo(signed_tx.hex())
             if not no_broadcast:
-                txhex = account.broadcast(signed_tx)
+                txhex = await account.broadcast(signed_tx)
                 click.echo(f"Transaction {txhex} broadcast successfully")
             else:
                 click.echo("Transaction not broadcast")

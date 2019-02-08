@@ -1,12 +1,41 @@
+import json
+import typing
+
+import attr
 from trezorlib.transport import enumerate_devices, get_transport
 from trezorlib.client import TrezorClient
 from trezorlib.ui import ClickUI
-from trezorlib import coins, btc, tools
+from trezorlib import coins, btc, tools, messages, protobuf
 from trezorlib.messages import SignTx, TxInputType, TxOutputType, OutputScriptType
 
 from . import account, tx_api
+from .address import Address
 
 SATOSHIS = account.SATOSHIS
+
+
+@attr.s(auto_attribs=True)
+class TrezorSigningData:
+    coin_name: str
+    details: SignTx
+    inputs: typing.List[TxInputType]
+    outputs: typing.List[TxOutputType]
+    prev_txes: typing.Dict[bytes, messages.TransactionType]
+
+    def to_dict(self):
+        return {
+            "coin_name": self.coin_name,
+            "details": protobuf.to_dict(self.details),
+            "inputs": [protobuf.to_dict(i) for i in self.inputs],
+            "outputs": [protobuf.to_dict(o) for o in self.outputs],
+            "prev_txes": {
+                key.hex(): protobuf.to_dict(value)
+                for key, value in self.prev_txes.items()
+            },
+        }
+
+    def to_json(self):
+        return json.dumps(self.to_dict())
 
 
 def get_all_clients(ui_factory=None):
@@ -46,40 +75,46 @@ def show_address(client, account, address):
     )
 
 
-def sign_tx(client, account, utxos, recipients, change):
+def utxo_to_input(utxo, script_type):
+    return TxInputType(
+        amount=int(utxo.amount),
+        address_n=utxo.address.path,
+        script_type=script_type,
+        prev_hash=bytes.fromhex(utxo.address.tx["txid"]),
+        prev_index=utxo.vout,
+        sequence=0xFFFF_FFFD,
+    )
+
+
+def recipient_to_output(address, amount, script_type=OutputScriptType.PAYTOADDRESS):
+    if isinstance(address, Address):
+        address = address.str
+    return TxOutputType(address=address, amount=int(amount), script_type=script_type)
+
+
+def signing_data(account, utxos, recipients, change):
     details = SignTx(version=2)
     prev_txes = {
-        bytes.fromhex(tx["txid"]): tx_api.json_to_tx(account.coin, tx)
-        for _, tx, _, _ in utxos
+        bytes.fromhex(u.tx["txid"]): tx_api.json_to_tx(account.coin, u.tx)
+        for u in utxos
     }
-    inputs = [
-        TxInputType(
-            address_n=address.path,
-            prev_hash=bytes.fromhex(tx["txid"]),
-            prev_index=prevout,
-            sequence=0xFFFF_FFFD,
-            script_type=account.account_type.input_script_type,
-            amount=int(amount),
-        )
-        for address, tx, prevout, amount in utxos
+    inputs = [utxo_to_input(u, account.account_type.input_script_type) for u in utxos]
+    outputs = [recipient_to_output(address, amount) for address, amount in recipients]
+    change_outputs = [
+        recipient_to_output(address, amount, account.account_type.output_script_type)
+        for address, amount in change
     ]
-    outputs = [
-        TxOutputType(
-            address=address,
-            amount=int(amount),
-            script_type=OutputScriptType.PAYTOADDRESS,
-        )
-        for address, amount in recipients
-    ]
-    if change > 0:
-        # XXX this should not be here
-        change_address = account.get_unused_address(change=True)
-        outputs.append(
-            TxOutputType(
-                address_n=change_address.path,
-                amount=change,
-                script_type=account.account_type.output_script_type,
-            )
-        )
 
-    return btc.sign_tx(client, account.coin_name, inputs, outputs, details, prev_txes)
+    return TrezorSigningData(
+        coin_name=account.coin_name,
+        details=details,
+        inputs=inputs,
+        outputs=outputs + change_outputs,
+        prev_txes=prev_txes,
+    )
+
+
+def sign_tx(client, data):
+    return btc.sign_tx(
+        client, data.coin_name, data.inputs, data.outputs, data.details, data.prev_txes
+    )

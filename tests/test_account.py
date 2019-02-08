@@ -99,6 +99,15 @@ VECTORS = [
 ]
 
 
+@pytest.fixture
+def account():
+    vector = VECTORS[0]
+    backend = MagicMock()
+    account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
+    setattr(account, "test_vector", vector)
+    return account
+
+
 @pytest.mark.parametrize("vector", VECTORS)
 def test_from_xpub(vector):
     account = Account.from_xpub(vector.coin_name, vector.xpub)
@@ -124,16 +133,12 @@ def test_addresses(vector):
 
 
 @pytest.mark.asyncio
-async def test_unused_address():
-    vector = VECTORS[0]
-    backend = MagicMock()
-    account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
-
+async def test_unused_address(account):
     async def empty_address(addr):
         return {"addressStr": addr, "totalReceived": 0}
 
-    backend.get_address_data = empty_address
-    assert (await account.get_unused_address()).str == vector.addresses[0]
+    account.backend.get_address_data = empty_address
+    assert (await account.get_unused_address()).str == account.test_vector.addresses[0]
 
     counter = 0
 
@@ -143,15 +148,12 @@ async def test_unused_address():
         counter += 1
         return {"addressStr": addr, "totalReceived": total}
 
-    backend.get_address_data = first_three_not_empty
-    assert (await account.get_unused_address()).str == vector.addresses[3]
+    account.backend.get_address_data = first_three_not_empty
+    assert (await account.get_unused_address()).str == account.test_vector.addresses[3]
 
 
 @pytest.mark.asyncio
-async def test_active_addresses():
-    vector = VECTORS[0]
-    backend = MagicMock()
-    account = Account.from_xpub(vector.coin_name, vector.xpub, backend=backend)
+async def test_active_addresses(account):
     counter = 0
     ACTIVE_ADDRESSES = 3
 
@@ -161,9 +163,46 @@ async def test_active_addresses():
         counter += 1
         return {"addressStr": addr, "totalReceived": total}
 
-    backend.get_address_data = mock_address_data
+    account.backend.get_address_data = mock_address_data
     active_addresses = [a async for a in account.active_address_data()]
 
     assert len(active_addresses) == ACTIVE_ADDRESSES
     assert counter > BIP32_ADDRESS_DISCOVERY_LIMIT
 
+
+@pytest.mark.asyncio
+async def test_active_after_gap(account):
+    selected_address = account.test_vector.change[3]
+
+    async def mock_address_data(addr):
+        if addr == selected_address:
+            total = 1000
+        else:
+            total = 0
+        return {"addressStr": addr, "totalReceived": total}
+
+    account.backend.get_address_data = mock_address_data
+
+    active_addresses = [a async for a in account.active_address_data()]
+    change_addresses = [a async for a in account.active_address_data(change=True)]
+
+    assert active_addresses == []
+    assert len(change_addresses) == 1
+    assert change_addresses[0].str == selected_address
+
+
+@pytest.mark.asyncio
+async def test_balance(account):
+    counter = 0
+    ACTIVE_ADDRESSES = 7
+
+    async def mock_address_data(addr):
+        nonlocal counter
+        total = 100 if counter < ACTIVE_ADDRESSES else 0
+        counter += 1
+        return {"addressStr": addr, "totalReceived": total, "balance": total * 2}
+
+    account.backend.get_address_data = mock_address_data
+
+    balance = await account.balance()
+    assert balance == ACTIVE_ADDRESSES * 200
