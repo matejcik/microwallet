@@ -148,46 +148,79 @@ async def receive(obj, show):
         trezor.show_address(client, account, address)
 
 
+async def do_fund(account, address, amount, verbose):
+    try:
+        recipients = [(address, amount)]
+        utxos, change = await account.fund_tx(recipients)
+    except exceptions.InsufficientFunds:
+        die("Insufficient funds")
+
+    if verbose:
+        symbol = account.coin["shortcut"]
+        click.echo("Spending from:", err=True)
+        total_in = Decimal(0)
+        total_out = amount + Decimal(change)
+        for u in utxos:
+            am_out = u.value / SATOSHIS
+            click.echo(f"{u.tx['txid']}:{u.vout} - {am_out:f} {symbol}", err=True)
+            total_in += u.value
+        fee_rate = await account.estimate_fee()
+        actual_fee = total_in - total_out
+        fee_out = actual_fee / SATOSHIS
+        click.echo(f"Fee: {fee_out:f} {symbol} (at {fee_rate} sat/KB)", err=True)
+
+    change_rcpts = []
+    if change > 0:
+        change_addr = await account.get_unused_address(change=True)
+        change_rcpts.append((change_addr, change))
+
+    return trezor.signing_data(account, utxos, recipients, change_rcpts)
+
+
+@async_command
+# fmt: off
+@click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
+@click.option("-j", "--json", "json_file", type=click.File("w"), help="Store a JSON transaction")
+@click.option("-p", "--psbt", "psbt_file", type=click.File("wb"), help="Store as BIP-174 PSBT")
+@click.argument("address")
+@click.argument("amount", type=Decimal)
+# fmt: on
+async def fund(obj, address, amount, json_file, psbt_file, verbose):
+    _, account = obj
+    signing_data = await do_fund(account, address, amount, verbose)
+    if json_file:
+        json_file.write(signing_data.to_json())
+        json_file.write("\n")
+    if psbt_file:
+        click.echo("PSBT not ready just yet")
+    if not json_file and not psbt_file:
+        click.echo(signing_data.to_json(indent=4))
+
+
 @async_command
 # fmt: off
 @click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
 @click.option("-n", "--dry-run", is_flag=True, help="Do not sign with Trezor")
 @click.option("-b", "--no-broadcast", is_flag=True, help="Do not broadcast signed transaction")
+@click.option("-j", "--json", type=click.File("w"), help="Store unsigned transaction as JSON")
+@click.option("-p", "--psbt", type=click.File("wb"), help="Store funded transa")
 # fmt: on
 @click.argument("address")
 @click.argument("amount", type=Decimal)
 async def send(obj, address, amount, verbose, dry_run, no_broadcast):
     client, account = obj
-    try:
-        recipients = [(address, amount)]
-        utxos, change = await account.fund_tx(recipients)
+    signing_data = await do_fund(account, address, amount, verbose)
+
+    if client and not dry_run:
+        _, signed_tx = trezor.sign_tx(client, signing_data)
         if verbose:
-            symbol = account.coin["shortcut"]
-            click.echo("Spending from:")
-            total_in = Decimal(0)
-            total_out = amount + Decimal(change)
-            for _, tx, prevout, amount in utxos:
-                am_out = amount / SATOSHIS
-                click.echo(f"{tx['txid']}:{prevout} - {am_out:f} {symbol}")
-                total_in += amount
-            fee_rate = await account.estimate_fee()
-            actual_fee = total_in - total_out
-            fee_out = actual_fee / SATOSHIS
-            click.echo(f"Fee: {fee_out:f} {symbol} (at {fee_rate} sat/KB)")
-
-        if client and not dry_run:
-            _, signed_tx = trezor.sign_tx(client, account, utxos, recipients, change)
-            if verbose:
-                click.echo("Signed transaction hex:")
-                click.echo(signed_tx.hex())
-            if not no_broadcast:
-                txhex = await account.broadcast(signed_tx)
-                click.echo(f"Transaction {txhex} broadcast successfully")
-            else:
-                click.echo("Transaction not broadcast")
-
-    except exceptions.InsufficientFunds:
-        die("Insufficient funds")
+            click.echo("Signed transaction hex:")
+            click.echo(signed_tx.hex())
+        if not no_broadcast:
+            txhex = await account.broadcast(signed_tx)
+            click.echo(f"Transaction {txhex} broadcast successfully")
+        else:
+            click.echo("Transaction not broadcast")
 
 
 if __name__ == "__main__":
