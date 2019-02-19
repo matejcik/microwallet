@@ -63,6 +63,7 @@ class WebsocketBackend:
             """Callback. Process WS response and resume the appropriate id."""
             if fut.cancelled():
                 self._responder = None
+                return
             try:
                 response = fut.result()
                 data = json.loads(response, parse_float=Decimal)
