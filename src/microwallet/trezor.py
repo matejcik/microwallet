@@ -34,8 +34,8 @@ class TrezorSigningData:
             },
         }
 
-    def to_json(self):
-        return json.dumps(self.to_dict())
+    def to_json(self, **kwargs):
+        return json.dumps(self.to_dict(), sort_keys=True, **kwargs)
 
 
 def get_all_clients(ui_factory=None):
