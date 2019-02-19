@@ -77,10 +77,10 @@ def show_address(client, account, address):
 
 def utxo_to_input(utxo, script_type):
     return TxInputType(
-        amount=int(utxo.amount),
+        amount=int(utxo.value),
         address_n=utxo.address.path,
         script_type=script_type,
-        prev_hash=bytes.fromhex(utxo.address.tx["txid"]),
+        prev_hash=bytes.fromhex(utxo.tx["txid"]),
         prev_index=utxo.vout,
         sequence=0xFFFF_FFFD,
     )

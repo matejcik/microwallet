@@ -197,7 +197,7 @@ class Account:
         utxos = []
         total = 0
         required = int(sum(amount for _, amount in recipients))
-        fee_rate_kb = self.estimate_fee()
+        fee_rate_kb = await self.estimate_fee()
 
         inputs = []
         witness = []
@@ -224,14 +224,13 @@ class Account:
         tx_data_with_change = tx_data.copy()
         tx_data_with_change["outputs"] = outputs[:] + [change_output]
 
-        utxos = [u async for u in self.find_utxos()]
-        utxos.sort()
+        found_utxos = [u async for u in self.find_utxos()]
+        found_utxos.sort()
 
-        async for utxo in self.find_utxos():
+        for utxo in found_utxos:
             utxos.append(utxo)
-            _, _, _, amount = utxo
-            total += int(amount)
-            inp, wit = self._make_input(*utxo)
+            total += int(utxo.value)
+            inp, wit = self._make_input(utxo)
             inputs.append(inp)
             witness.append(wit)
             if total < required:
@@ -266,13 +265,13 @@ class Account:
 
         return tx_len * fee_rate_kb // 1000
 
-    def _make_input(self, address, prevtx, prevout, _):
+    def _make_input(self, utxo):
         fake_sig = b"\0" * 71
-        script_sig, witness = self.account_type.script_sig(address, fake_sig)
+        script_sig, witness = self.account_type.script_sig(utxo.address, fake_sig)
         return (
             dict(
-                tx=bytes.fromhex(prevtx["txid"]),
-                index=prevout,
+                tx=bytes.fromhex(utxo.tx["txid"]),
+                index=utxo.vout,
                 script_sig=script_sig,
                 sequence=RBF_SEQUENCE_NUMBER,
             ),

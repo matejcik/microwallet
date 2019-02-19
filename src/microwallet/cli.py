@@ -126,10 +126,11 @@ async def show(obj, utxo):
     symbol = account.coin["shortcut"]
     if utxo:
         total = Decimal(0)
-        async for address, tx, vout, value in account.find_utxos(progress=progress):
-            val_out = value / SATOSHIS
-            click.echo(f"{address.str}: {tx['txid']}:{vout} - {val_out:f} {symbol}")
-            total += value
+        async for u in account.find_utxos(progress=progress):
+            val_out = u.value / SATOSHIS
+            txid = u.tx["txid"]
+            click.echo(f"{u.address.str}: {txid}:{u.vout} - {val_out:f} {symbol}")
+            total += u.value
         click.echo("\r\033[K", nl=False)
     else:
         total = await account.balance()
