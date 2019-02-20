@@ -3,6 +3,7 @@ __pycache__/
 /build/
 /dist/
 *.egg-info/
+/docs/_build
 
 # Unit test / coverage reports
 .pytest_cache/

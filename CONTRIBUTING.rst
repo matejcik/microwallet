@@ -45,26 +45,22 @@ articles, and such.
 Submit Feedback
 ~~~~~~~~~~~~~~~
 
-The best way to send feedback is to file an issue at https://github.com/matejcik/microwallet/issues.
+The best way to send feedback is to `file an issue`_.
 
-If you are proposing a feature:
-
-* Explain in detail how it would work.
-* Keep the scope as narrow as possible, to make it easier to implement.
-* Remember that this is a volunteer-driven project, and that contributions
-  are welcome :)
+.. _file an issue: https://github.com/matejcik/microwallet/issues
 
 Get Started!
 ------------
 
-Ready to contribute? Here's how to set up `microwallet` for local development.
+Ready to contribute? Here's how to set up ``microwallet`` for local development.
 
-1. Fork the `microwallet` repo on GitHub.
+1. Fork the ``microwallet`` repo on GitHub.
 2. Clone your fork locally::
 
     $ git clone git@github.com:your_name_here/microwallet.git
 
-3. Install your local copy into a virtualenv. Assuming you have virtualenvwrapper installed, this is how you set up your fork for local development::
+3. Install your local copy into a virtualenv. Assuming you have ``virtualenvwrapper``
+   installed, this is how you set up your fork for local development::
 
     $ mkvirtualenv microwallet
     $ cd microwallet/
@@ -80,7 +76,7 @@ Ready to contribute? Here's how to set up `microwallet` for local development.
    tests, including testing other Python versions with tox::
 
     $ flake8 microwallet tests
-    $ python setup.py test or py.test
+    $ pytest
     $ tox
 
    To get flake8 and tox, just pip install them into your virtualenv.
@@ -102,16 +98,17 @@ Before you submit a pull request, check that it meets these guidelines:
 2. If the pull request adds functionality, the docs should be updated. Put
    your new functionality into a function with a docstring, and add the
    feature to the list in README.rst.
-3. The pull request should work for Python 3.6 and 3.7. Check
-   https://travis-ci.org/matejcik/microwallet/pull_requests
+3. The pull request should work for Python 3.6 and 3.7. Check `Travis`_
    and make sure that the tests pass for all supported Python versions.
+
+.. _Travis: https://travis-ci.org/matejcik/microwallet/pull_requests
 
 Tips
 ----
 
 To run a subset of tests::
 
-$ py.test tests.test_microwallet
+$ pytest tests.test_microwallet
 
 
 Deploying
