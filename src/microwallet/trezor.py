@@ -87,9 +87,12 @@ def utxo_to_input(utxo, script_type):
 
 
 def recipient_to_output(address, amount, script_type=OutputScriptType.PAYTOADDRESS):
+    output = TxOutputType(amount=int(amount), script_type=script_type)
     if isinstance(address, Address):
-        address = address.str
-    return TxOutputType(address=address, amount=int(amount), script_type=script_type)
+        output.address_n = address.path
+    else:
+        output.address = address
+    return output
 
 
 def signing_data(account, utxos, recipients, change):
