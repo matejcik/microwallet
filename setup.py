@@ -11,9 +11,10 @@ with open("HISTORY.rst") as history_file:
 
 requirements = [
     "Click>=7,<8",
-    "trezor>=0.11",
-    "python-bitcoinlib>=0.10.1",
+    "trezor>=0.11.1",
     "attrs>=18.1.0",
+    "websockets>=7.0",
+    "construct>=2.9",
 ]
 
 setup(
