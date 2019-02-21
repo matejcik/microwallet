@@ -6,7 +6,7 @@ import attr
 import pytest
 from asynctest import MagicMock, patch
 
-from microwallet import account_type
+from microwallet import account_types
 from microwallet.account import Account, BIP32_ADDRESS_DISCOVERY_LIMIT
 from microwallet.formats import xpub
 
@@ -15,7 +15,7 @@ from microwallet.formats import xpub
 class AccountVector:
     coin_name: str
     xpub: str
-    type: account_type.AccountType
+    type: account_types.AccountType
     addresses: typing.List[str]
     change: typing.List[str]
 
@@ -24,7 +24,7 @@ VECTORS = [
     AccountVector(
         # m/49h/2h/15h
         coin_name="Litecoin",
-        type=account_type.ACCOUNT_TYPE_DEFAULT,
+        type=account_types.ACCOUNT_TYPE_DEFAULT,
         xpub=(
             "Mtub2syZtptY6mWDbfUYxStNwpWfnC1GCjgn94i7LACu9euPviukSSVp"
             "tfWu8kC7LKjD2pEUAf4Tk78zEG3eNEeFp1vdCuEaWu4thgYCiTP5fiA"
@@ -49,7 +49,7 @@ VECTORS = [
     AccountVector(
         # m/44h/3h/15h
         coin_name="Dogecoin",
-        type=account_type.ACCOUNT_TYPE_LEGACY,
+        type=account_types.ACCOUNT_TYPE_LEGACY,
         xpub=(
             "dgub8sbe5Mi8LA4eBLHDvNhQWYu8awPXZThRPr4B4o3yzUYx4HswUunt"
             "8C5pTCQS45ZGcEaTbeJ1NuwyTfD8hERktZw3r3r3iypBnAAxhNxQLFM"
@@ -74,7 +74,7 @@ VECTORS = [
     AccountVector(
         # m/84h/0h/15h
         coin_name="Bitcoin",
-        type=account_type.ACCOUNT_TYPE_SEGWIT,
+        type=account_types.ACCOUNT_TYPE_SEGWIT,
         xpub=(
             "zpub6rszzdAK6RubKxxKxydVq6Bpjz1mt8BBitik5JMBy3QZeegBLHYp"
             "9Nw5UR6xa6PrMdn4hfF79rQcfri7pvqo5jJdrYj1WowiVDtGBjD9nbS"

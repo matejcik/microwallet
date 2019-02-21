@@ -4,13 +4,26 @@ import sys
 from decimal import Decimal
 import asyncio
 import functools
+import ssl
 
 import click
-from trezorlib import btc
+from trezorlib import btc, coins
 
-from . import account, account_type, trezor, exceptions
-from .blockbook import BlockbookBackend, WebsocketBackend
+from . import account, account_types, trezor, exceptions
+from .blockbook import BlockbookWebsocketBackend
 from .account import SATOSHIS
+
+
+DEV_BACKEND_PORTS = {
+    "Bitcoin": 9130,
+    "Testnet": 19130,
+    "Litecoin": 9134,
+    "Zcash": 9132,
+    "Dogecoin": 9138,
+}
+
+SSL_UNVERIFIED_CONTEXT = ssl.SSLContext()
+SSL_UNVERIFIED_CONTEXT.verify_mode = ssl.CERT_NONE
 
 
 class ChoiceType(click.Choice):
@@ -24,9 +37,9 @@ class ChoiceType(click.Choice):
 
 
 ACCOUNT_TYPES = {
-    "legacy": account_type.ACCOUNT_TYPE_LEGACY,
-    "default": account_type.ACCOUNT_TYPE_DEFAULT,
-    "segwit": account_type.ACCOUNT_TYPE_SEGWIT,
+    "legacy": account_types.ACCOUNT_TYPE_LEGACY,
+    "default": account_types.ACCOUNT_TYPE_DEFAULT,
+    "segwit": account_types.ACCOUNT_TYPE_SEGWIT,
 }
 
 
@@ -49,7 +62,11 @@ def select_trezor(trezor_path):
         die("Please connect your Trezor device")
     if trezor_path:
         selected_trezors = [
-            t for t in trezors if t.transport.get_path().startswith(trezor_path)
+            t
+            for t in trezors
+            if t.transport.get_path().startswith(trezor_path)
+            or t.features.label == trezor_path
+            or t.get_device_id() == trezor_path
         ]
         if not selected_trezors:
             click.echo(f"Could not find Trezor by path: {trezor_path}")
@@ -75,13 +92,18 @@ def select_trezor(trezor_path):
 @click.option("-c", "--coin-name", default="Bitcoin", help="Coin name")
 @click.option("-u", "--url", default=os.environ.get("BLOCKBOOK_URL"), help="Blockbook backend URL")
 @click.option("-a", "--account", "account_num", type=int, default=0, help="Account number")
-@click.option("-t", "--type", "account_type", type=ChoiceType(ACCOUNT_TYPES), default="default", help="Account type")
-@click.option("-p", "--trezor-path", default=os.environ.get("TREZOR_PATH"), help="Path to Trezor device")
+@click.option("-t", "--type", "account_type", type=ChoiceType(ACCOUNT_TYPES), help="Account type")
+@click.option("-p", "--trezor-path", default=os.environ.get("TREZOR_PATH"), help="Path, label or serial number of a Trezor device")
 @click.option("-x", "--xpub", help="Use this xpub instead of retrieving an account from Trezor")
 @click.pass_context
 # fmt: on
 def main(ctx, coin_name, account_num, account_type, trezor_path, xpub, url):
     """Console script for microwallet."""
+    if coin_name not in coins.by_name:
+        die(f"Unknown coin: {coin_name}")
+    if not account_type:
+        account_type = account_types.default_account_type(coins.by_name[coin_name])
+
     if not xpub:
         client = select_trezor(trezor_path)
         acc = trezor.get_account(client, coin_name, account_num, account_type)
@@ -89,11 +111,19 @@ def main(ctx, coin_name, account_num, account_type, trezor_path, xpub, url):
         client = None
         acc = account.Account.from_xpub(coin_name, xpub)
 
-    if url:
-        if url.startswith("wss:"):
-            acc.backend = WebsocketBackend(coin_name, urls=[url])
-        else:
-            acc.backend = BlockbookBackend(coin_name, urls=[url])
+    if int(os.environ.get("MICROWALLET_DEV_BACKEND", 0)):
+        coin_port = DEV_BACKEND_PORTS[coin_name]
+        url = f"wss://blockbook-dev.corp.sldev.cz:{coin_port}/websocket"
+        acc.backend = BlockbookWebsocketBackend(coin_name, url, SSL_UNVERIFIED_CONTEXT)
+
+    elif url:
+        ssl_context = (
+            SSL_UNVERIFIED_CONTEXT
+            if int(os.environ.get("MICROWALLET_INSECURE", 0))
+            else None
+        )
+        acc.backend = BlockbookWebsocketBackend(coin_name, url, ssl_context)
+
     ctx.obj = client, acc
 
 

@@ -5,10 +5,10 @@ import attr
 from trezorlib.transport import enumerate_devices, get_transport
 from trezorlib.client import TrezorClient
 from trezorlib.ui import ClickUI
-from trezorlib import coins, btc, tools, messages, protobuf
+from trezorlib import coins, btc, tools, messages, protobuf, tx_api
 from trezorlib.messages import SignTx, TxInputType, TxOutputType, OutputScriptType
 
-from . import account, tx_api
+from . import account
 from .address import Address
 
 SATOSHIS = account.SATOSHIS

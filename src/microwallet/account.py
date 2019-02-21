@@ -12,11 +12,10 @@ from trezorlib import coins, tools
 from trezorlib.messages import InputScriptType, OutputScriptType
 from trezorlib.ckd_public import public_ckd, get_subnode
 
-from .blockbook import WebsocketBackend
+from .blockbook import BlockbookWebsocketBackend
 from .formats import transaction, xpub
-from . import exceptions
+from . import account_types, exceptions
 from .address import Address, derive_output_script
-from .account_type import ACCOUNT_TYPE_LEGACY, ACCOUNT_TYPE_DEFAULT, ACCOUNT_TYPE_SEGWIT
 
 
 RBF_SEQUENCE_NUMBER = 0xFFFF_FFFD
@@ -57,7 +56,12 @@ def require_backend(func):
 
 class Account:
     def __init__(
-        self, coin_name, node, account_type=ACCOUNT_TYPE_LEGACY, path=None, backend=None
+        self,
+        coin_name,
+        node,
+        account_type=account_types.ACCOUNT_TYPE_LEGACY,
+        path=None,
+        backend=None,
     ):
         self.coin_name = coin_name
         try:
@@ -70,14 +74,13 @@ class Account:
         self.path = path or []
 
         if backend is None:
-            self.backend = WebsocketBackend(coin_name)
+            self.backend = BlockbookWebsocketBackend(coin_name)
         else:
             self.backend = backend
 
         self.node = node
         self.addr_node = get_subnode(node, 0)
         self.change_node = get_subnode(node, 1)
-        self.segwit = account_type is not ACCOUNT_TYPE_LEGACY
 
     @classmethod
     def from_xpub(cls, coin_name, xpubstr, **kwargs):
@@ -91,11 +94,11 @@ class Account:
             raise ValueError("Private key supplied, please use public key")
 
         if version == coin["xpub_magic"]:
-            account_type = ACCOUNT_TYPE_LEGACY
+            account_type = account_types.ACCOUNT_TYPE_LEGACY
         elif version == coin["xpub_magic_segwit_p2sh"]:
-            account_type = ACCOUNT_TYPE_DEFAULT
+            account_type = account_types.ACCOUNT_TYPE_DEFAULT
         elif version == coin["xpub_magic_segwit_native"]:
-            account_type = ACCOUNT_TYPE_SEGWIT
+            account_type = account_types.ACCOUNT_TYPE_SEGWIT
         else:
             raise ValueError("Unrecognized xpub magic (wrong coin maybe?)")
 
@@ -209,7 +212,7 @@ class Account:
 
         tx_data = dict(
             version=2,
-            segwit=self.segwit,
+            segwit=self.account_type.segwit,
             inputs=inputs,
             outputs=outputs,
             witness=witness,
@@ -257,7 +260,7 @@ class Account:
         base_tx_data["witness"] = None
         base_tx = len(transaction.Transaction.build(base_tx_data)) + 2
 
-        if not self.segwit:
+        if not self.account_type.segwit:
             tx_len = base_tx
         else:
             total_tx = len(transaction.Transaction.build(tx_data))
