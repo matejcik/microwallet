@@ -1,6 +1,7 @@
 import construct as c
-from trezorlib.tools import b58check_encode, b58check_decode
+
 from trezorlib.messages import HDNodeType
+from trezorlib.tools import b58check_decode, b58check_encode
 
 XpubStruct = c.Struct(
     "version" / c.Int32ub,

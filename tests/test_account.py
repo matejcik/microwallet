@@ -1,13 +1,12 @@
-import asyncio
 import itertools
 import typing
 
 import attr
 import pytest
-from asynctest import MagicMock, patch
+from asynctest import MagicMock
 
 from microwallet import account_types
-from microwallet.account import Account, BIP32_ADDRESS_DISCOVERY_LIMIT
+from microwallet.account import BIP32_ADDRESS_DISCOVERY_LIMIT, Account
 from microwallet.formats import xpub
 
 

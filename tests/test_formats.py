@@ -1,5 +1,5 @@
-import pytest
 import construct as c
+import pytest
 
 from microwallet.formats import CompactUint, ConstFlag
 

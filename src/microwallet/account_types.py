@@ -1,7 +1,7 @@
-import attr
-from typing import Callable, Any, Tuple, List
+from typing import Any, Callable, List, Tuple
 
-from trezorlib.tools import b58check_encode, hash_160
+import attr
+
 from trezorlib.messages import InputScriptType, OutputScriptType
 
 from . import address

@@ -1,9 +1,10 @@
 import typing
+
 import attr
 
-from trezorlib.tools import b58check_encode, b58check_decode, hash_160
+from trezorlib.tools import b58check_decode, b58check_encode, hash_160
 
-from .formats import op_push, bech32
+from .formats import bech32, op_push
 
 
 @attr.s(auto_attribs=True)

@@ -1,7 +1,7 @@
-from microwallet.formats import xpub
-
 import attr
 import pytest
+
+from microwallet.formats import xpub
 from trezorlib import coins
 from trezorlib.tools import H_
 

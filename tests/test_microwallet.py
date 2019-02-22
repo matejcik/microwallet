@@ -1,10 +1,8 @@
 """Tests for `microwallet` package."""
 
 import pytest
-
 from click.testing import CliRunner
 
-from microwallet import microwallet
 from microwallet import cli
 
 

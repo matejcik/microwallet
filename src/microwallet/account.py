@@ -1,22 +1,18 @@
 import asyncio
-from decimal import Decimal
-from enum import Enum
 import functools
-import typing
-from concurrent.futures import ThreadPoolExecutor
 import inspect
+import typing
+from decimal import Decimal
 
 import attr
 
-from trezorlib import coins, tools
-from trezorlib.messages import InputScriptType, OutputScriptType
-from trezorlib.ckd_public import public_ckd, get_subnode
+from trezorlib import coins
+from trezorlib.ckd_public import get_subnode
 
-from .blockbook import BlockbookWebsocketBackend
-from .formats import transaction, xpub
 from . import account_types, exceptions
 from .address import Address, derive_output_script
-
+from .blockbook import BlockbookWebsocketBackend
+from .formats import transaction, xpub
 
 RBF_SEQUENCE_NUMBER = 0xFFFF_FFFD
 SATOSHIS = Decimal(1e8)

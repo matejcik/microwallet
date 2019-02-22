@@ -1,13 +1,13 @@
 import asyncio
 import json
+import logging
 import random
 from decimal import Decimal
-import logging
 from urllib.parse import urlparse
 
 import websockets
 
-from trezorlib import coins, tx_api
+from trezorlib import coins
 
 LOG = logging.getLogger(__name__)
 

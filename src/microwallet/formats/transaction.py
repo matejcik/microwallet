@@ -1,6 +1,6 @@
 import construct as c
 
-from . import Optional, ConstFlag, CompactUint
+from . import CompactUint, ConstFlag, Optional
 
 BitcoinBytes = c.Prefixed(CompactUint, c.GreedyBytes)
 """Bitcoin string of bytes.

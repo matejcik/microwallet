@@ -1,18 +1,18 @@
 """Console script for microwallet."""
-import os
-import sys
-from decimal import Decimal
 import asyncio
 import functools
+import os
 import ssl
+import sys
+from decimal import Decimal
 
 import click
-from trezorlib import btc, coins
 
-from . import account, account_types, trezor, exceptions
-from .blockbook import BlockbookWebsocketBackend
+from trezorlib import coins
+
+from . import account, account_types, exceptions, trezor
 from .account import SATOSHIS
-
+from .blockbook import BlockbookWebsocketBackend
 
 DEV_BACKEND_PORTS = {
     "Bitcoin": 9130,

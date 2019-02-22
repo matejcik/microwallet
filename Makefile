@@ -1,5 +1,8 @@
-.PHONY: clean clean-test clean-pyc clean-build docs help
+.PHONY: clean clean-test clean-pyc clean-build docs help style style_check
 .DEFAULT_GOAL := help
+
+STYLE_TARGETS=src tests
+EXCLUDE_TARGETS=
 
 define BROWSER_PYSCRIPT
 import os, webbrowser, sys
@@ -50,9 +53,6 @@ clean-test: ## remove test and coverage artifacts
 	rm -fr htmlcov/
 	rm -fr .pytest_cache
 
-lint: ## check style with flake8
-	flake8 microwallet tests
-
 test: ## run tests quickly with the default Python
 	py.test
 
@@ -86,3 +86,14 @@ dist: clean ## builds source and wheel package
 
 install: clean ## install the package to the active Python's site-packages
 	python setup.py install
+
+
+style:
+	black $(STYLE_TARGETS)
+	isort --apply --recursive $(STYLE_TARGETS) --skip-glob "*/$(EXCLUDE_TARGETS)/*"
+	autoflake -i --remove-all-unused-imports -r $(STYLE_TARGETS) --exclude "$(EXCLUDE_TARGETS)"
+
+style_check:
+	black --check $(STYLE_TARGETS)
+	isort --diff --check-only --recursive $(STYLE_TARGETS) --skip-glob "*/$(EXCLUDE_TARGETS)/*"
+	flake8
