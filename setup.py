@@ -15,6 +15,7 @@ requirements = [
     "attrs>=18.1.0",
     "websockets>=7.0",
     "construct>=2.9",
+    "fastecdsa>=1.7",
 ]
 
 setup(

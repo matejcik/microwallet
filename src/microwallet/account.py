@@ -7,10 +7,10 @@ from decimal import Decimal
 import attr
 
 from trezorlib import coins
-from trezorlib.ckd_public import get_subnode
 
 from . import account_types, exceptions
 from .address import Address, derive_output_script
+from .bip32 import get_subnode
 from .blockbook import BlockbookWebsocketBackend
 from .formats import transaction, xpub
 
@@ -64,7 +64,6 @@ class Account:
             self.coin = coins.by_name[coin_name]
         except KeyError as e:
             raise ValueError(f"Unknown coin: {coin_name}") from e
-        self.decimals = SATOSHIS
 
         self.account_type = account_type
         self.path = path or []
