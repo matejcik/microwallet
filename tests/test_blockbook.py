@@ -1,6 +1,10 @@
+import asyncio
+import json
 from decimal import Decimal
 from urllib.parse import urlparse
+from unittest import mock
 
+import asynctest
 import pytest
 
 from microwallet.blockbook import BlockbookWebsocketBackend
@@ -20,6 +24,66 @@ def doge_backend():
 async def backend():
     async with doge_backend() as backend:
         yield backend
+
+
+class EchoSocket:
+    def __init__(self):
+        self.send_queue = []
+        self.recv_queue = []
+
+    async def send(self, datastr):
+        data = json.loads(datastr)
+        result = dict(id=data["id"], data=data["method"])
+        resultstr = json.dumps(result)
+        if self.recv_queue:
+            fut = self.recv_queue.pop(0)
+            fut.set_result(resultstr)
+        else:
+            self.send_queue.append(resultstr)
+
+    def recv(self):
+        fut = asyncio.Future()
+        if self.send_queue:
+            result = self.send_queue.pop(0)
+            fut.set_result(result)
+        else:
+            self.recv_queue.append(fut)
+        return fut
+
+    async def close(self):
+        pass
+
+
+class ReverseEchoSocket:
+    def __init__(self, trigger="run"):
+        self.send_queue = []
+        self.recv_queue = []
+        self.trigger = trigger
+        self.recving = False
+        self.idx = 0
+
+    async def send(self, datastr):
+        data = json.loads(datastr)
+        result = dict(id=data["id"], data=data["method"])
+        resultstr = json.dumps(result)
+        self.send_queue.append(resultstr)
+
+        if data["method"] == self.trigger:
+            self.recving = True
+            for fut, resultstr in zip(reversed(self.recv_queue), self.send_queue):
+                fut.set_result(resultstr)
+
+    def recv(self):
+        fut = asyncio.Future()
+        if self.recving and self.send_queue:
+            result = self.send_queue.pop(0)
+            fut.set_result(result)
+        else:
+            self.recv_queue.append(fut)
+        return fut
+
+    async def close(self):
+        pass
 
 
 def test_backend_from_coin():
@@ -52,6 +116,28 @@ def test_backend_from_url():
     https_backend = BlockbookWebsocketBackend("Bitcoin", url=https_url)
     # https url should be converted to wss version:
     assert https_backend.url == wss_url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("websocket", (EchoSocket, ReverseEchoSocket))
+async def test_echo(websocket):
+    fut = asyncio.Future()
+    fut.set_result(websocket())
+    websockets_connect = asynctest.Mock(return_value=fut)
+    with mock.patch("websockets.connect", websockets_connect):
+        backend = BlockbookWebsocketBackend("Dogecoin")
+        async with backend:
+            futures = []
+            for n in range(6):
+                method = f"method{n}"
+                futures.append(
+                    (method, asyncio.ensure_future(backend.fetch_json(method)))
+                )
+            futures.append(("run", asyncio.ensure_future(backend.fetch_json("run"))))
+
+            for method, fut in futures:
+                returned = await fut
+                assert returned == method
 
 
 @pytest.mark.network
@@ -92,16 +178,7 @@ async def test_get_txdata(backend):
     txdata = await backend.get_txdata(BURN_TX)
 
     assert txdata["txid"] == BURN_TX
-    for key in (
-        "vin",
-        "vout",
-        "version",
-        "locktime",
-        "hex",
-        "confirmations",
-        "blocktime",
-        "time",
-    ):
+    for key in ("vin", "vout", "version", "hex", "confirmations", "blocktime"):
         assert key in txdata
 
     vins = txdata["vin"]
@@ -109,16 +186,15 @@ async def test_get_txdata(backend):
     assert len(vins) == 1
     assert len(vouts) == 2
 
-    for key in ("txid", "vout", "scriptSig", "sequence"):
+    # for key in ("txid", "vout", "hex", "sequence"):
+    for key in ("txid", "hex", "sequence"):
         assert key in vins[0]
-    assert "hex" in vins[0]["scriptSig"]
 
     for vout in vouts:
-        for key in ("value", "n", "scriptPubKey"):
+        for key in ("value", "n", "hex"):
             assert key in vout
-        assert "hex" in vout["scriptPubKey"]
 
-    assert BURN_ADDRESS in vouts[0]["scriptPubKey"]["addresses"]
+    assert BURN_ADDRESS in vouts[0]["addresses"]
 
 
 @pytest.mark.network
@@ -152,3 +228,11 @@ async def test_get_utxos(backend):
     assert my_utxo
     assert my_utxo["vout"] == 0
     assert my_utxo["value"] == "314159265"
+
+
+@pytest.mark.network
+@pytest.mark.asyncio
+async def test_estimate_fee(backend):
+    fee = await backend.estimate_fee(10)
+    assert fee
+    assert int(fee)
