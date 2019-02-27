@@ -1,4 +1,3 @@
-
 import construct as c
 
 from . import CompactUint, Optional

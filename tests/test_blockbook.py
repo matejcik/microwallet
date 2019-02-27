@@ -1,8 +1,8 @@
 import asyncio
 import json
 from decimal import Decimal
-from urllib.parse import urlparse
 from unittest import mock
+from urllib.parse import urlparse
 
 import asynctest
 import pytest
