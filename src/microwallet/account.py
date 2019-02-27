@@ -238,7 +238,7 @@ class Account:
             overfunds = total - required
 
             if overfunds == fee_without_change:
-                return utxos, None
+                return utxos, 0
 
             if overfunds > fee_without_change:
                 fee_with_change = self._calculate_fee(tx_data_with_change, fee_rate_kb)

@@ -5,7 +5,7 @@ import attr
 import pytest
 from asynctest import MagicMock
 
-from microwallet import account_types
+from microwallet import account_types, exceptions
 from microwallet.account import BIP32_ADDRESS_DISCOVERY_LIMIT, Account
 from microwallet.formats import xpub
 
@@ -18,6 +18,8 @@ class AccountVector:
     addresses: typing.List[str]
     change: typing.List[str]
 
+
+SATOSHI_PER_UTXO = 10000
 
 VECTORS = [
     AccountVector(
@@ -134,7 +136,7 @@ def test_addresses(vector):
 @pytest.mark.asyncio
 async def test_unused_address(account):
     async def empty_address(addr):
-        return {"addressStr": addr, "totalReceived": 0}
+        return {"address": addr, "totalReceived": 0}
 
     account.backend.get_address_data = empty_address
     assert (await account.get_unused_address()).str == account.test_vector.addresses[0]
@@ -145,7 +147,7 @@ async def test_unused_address(account):
         nonlocal counter
         total = 100 if counter < 3 else 0
         counter += 1
-        return {"addressStr": addr, "totalReceived": total}
+        return {"address": addr, "totalReceived": total}
 
     account.backend.get_address_data = first_three_not_empty
     assert (await account.get_unused_address()).str == account.test_vector.addresses[3]
@@ -160,7 +162,7 @@ async def test_active_addresses(account):
         nonlocal counter
         total = 100 if counter < ACTIVE_ADDRESSES else 0
         counter += 1
-        return {"addressStr": addr, "totalReceived": total}
+        return {"address": addr, "totalReceived": total}
 
     account.backend.get_address_data = mock_address_data
     active_addresses = [a async for a in account.active_address_data()]
@@ -178,7 +180,7 @@ async def test_active_after_gap(account):
             total = 1000
         else:
             total = 0
-        return {"addressStr": addr, "totalReceived": total}
+        return {"address": addr, "totalReceived": total}
 
     account.backend.get_address_data = mock_address_data
 
@@ -199,9 +201,80 @@ async def test_balance(account):
         nonlocal counter
         total = 100 if counter < ACTIVE_ADDRESSES else 0
         counter += 1
-        return {"addressStr": addr, "totalReceived": total, "balance": total * 2}
+        return {"address": addr, "totalReceived": total * 2, "balance": total}
 
     account.backend.get_address_data = mock_address_data
 
     balance = await account.balance()
-    assert balance == ACTIVE_ADDRESSES * 200
+    assert balance == ACTIVE_ADDRESSES * 100
+
+
+@pytest.fixture(scope="function", params=((10, 1), (1, 10), (10, 3)))
+def utxo_account(request, account):
+    active_addresses, utxo_per_address = request.param
+    counter = 0
+    utxo_counter = 0
+
+    async def mock_address_data(addr):
+        nonlocal counter
+        total = SATOSHI_PER_UTXO * utxo_per_address if counter < active_addresses else 0
+        counter += 1
+        return {"address": addr, "totalReceived": total, "balance": total}
+
+    async def mock_utxos(addr):
+        nonlocal utxo_counter
+        utxos = []
+        for _ in range(utxo_per_address):
+            utxo = {
+                "txid": "0F" * 32,
+                "vout": utxo_counter,
+                "value": str(SATOSHI_PER_UTXO),
+            }
+            utxos.append(utxo)
+            utxo_counter += 1
+        return utxos
+
+    async def mock_txdata(txid):
+        return {"txid": txid}
+
+    async def mock_estimate_fee(blocks):
+        return 100
+
+    account.backend.get_address_data = mock_address_data
+    account.backend.get_utxos = mock_utxos
+    account.backend.get_txdata = mock_txdata
+    account.backend.estimate_fee = mock_estimate_fee
+    return account
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amount", (1000, 10000, 20000, 50000))
+async def test_fund_simple(utxo_account, amount):
+    ADDRESS = VECTORS[0].addresses[0]
+    utxos, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    assert utxos
+    total_spent = sum(u.value for u in utxos)
+    assert total_spent > amount
+    assert change < total_spent - amount
+
+
+@pytest.mark.asyncio
+async def test_insufficient_funds(utxo_account):
+    with pytest.raises(exceptions.InsufficientFunds):
+        ADDRESS = VECTORS[0].addresses[0]
+        await utxo_account.fund_tx([(ADDRESS, 1e10)])
+
+
+@pytest.mark.asyncio
+async def test_change_is_dust(utxo_account):
+    ADDRESS = VECTORS[0].addresses[0]
+    amount = SATOSHI_PER_UTXO - 100
+    _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    assert change == 0
+
+    # XXX the following does not work because our backend mock is stupid, and returns
+    # active addresses limited number of times, as opposed to limited number of addrs.
+    # So a second call to find_utxos will find 0 active addresses -> game over
+    # amount += 6 * SATOSHI_PER_UTXO
+    # _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    # assert change == 0
