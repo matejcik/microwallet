@@ -189,7 +189,7 @@ async def do_fund(account, address, amount, verbose):
         symbol = account.coin["shortcut"]
         click.echo("Spending from:", err=True)
         total_in = Decimal(0)
-        total_out = amount + Decimal(change)
+        total_out = amount + Decimal(change or 0)
         for u in utxos:
             am_out = u.value / SATOSHIS
             click.echo(f"{u.tx['txid']}:{u.vout} - {am_out:f} {symbol}", err=True)
@@ -200,7 +200,7 @@ async def do_fund(account, address, amount, verbose):
         click.echo(f"Fee: {fee_out:f} {symbol} (at {fee_rate} sat/KB)", err=True)
 
     change_rcpts = []
-    if change > 0:
+    if change is not None:
         change_addr = await account.get_unused_address(change=True)
         change_rcpts.append((change_addr, change))
 
