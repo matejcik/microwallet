@@ -15,7 +15,7 @@ Types of Contributions
 Report Bugs
 ~~~~~~~~~~~
 
-Report bugs at https://github.com/matejcik/microwallet/issues.
+Report bugs at https://github.com/trezor/microwallet/issues.
 
 If you are reporting a bug, please include:
 
@@ -47,7 +47,7 @@ Submit Feedback
 
 The best way to send feedback is to `file an issue`_.
 
-.. _file an issue: https://github.com/matejcik/microwallet/issues
+.. _file an issue: https://github.com/trezor/microwallet/issues
 
 Get Started!
 ------------
