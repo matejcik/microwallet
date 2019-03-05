@@ -5,15 +5,15 @@ microwallet
 .. image:: https://img.shields.io/pypi/v/microwallet.svg
         :target: https://pypi.python.org/pypi/microwallet
 
-.. image:: https://img.shields.io/travis/matejcik/microwallet.svg
-        :target: https://travis-ci.org/matejcik/microwallet
+.. image:: https://img.shields.io/travis/trezor/microwallet.svg
+        :target: https://travis-ci.org/trezor/microwallet
 
 .. image:: https://readthedocs.org/projects/microwallet/badge/?version=latest
         :target: https://microwallet.readthedocs.io/en/latest/?badge=latest
         :alt: Documentation Status
 
-.. image:: https://pyup.io/repos/github/matejcik/microwallet/shield.svg
-     :target: https://pyup.io/repos/github/matejcik/microwallet/
+.. image:: https://pyup.io/repos/github/trezor/microwallet/shield.svg
+     :target: https://pyup.io/repos/github/trezor/microwallet/
      :alt: Updates
 
 
@@ -22,6 +22,9 @@ Just plug in your Trezor and go!
 
 You can use microwallet as a highly scriptable CLI, or you can use it as a library
 in your Python application.
+
+Microwallet currently requires an **unreleased version of Blockbook**. You can use your own
+instance, or wait for gradual rollout of the required features in the upcoming weeks.
 
 .. _Trezor: https://trezor.io
 .. _Blockbook: https://github.com/trezor/blockbook
