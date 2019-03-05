@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from decimal import Decimal
 from unittest import mock
 from urllib.parse import urlparse
@@ -15,9 +16,24 @@ BURN_ADDRESS = "D8microwa11etxxxxxxxxxxxxxxxwHnove"
 BURN_TX = "7fd7ae813d65a00c7cf593ed354eedd71698473b0f7d7f1780f246ed340cf291"
 COINBASE_TX = "b45db0667e5d7b80d867581d976f6735eb96d95baa3259cdfb91e13fd243caad"
 
+USE_DEV_BACKEND = int(os.environ.get("MICROWALLET_DEV_BACKEND", "0"))
+
 
 def doge_backend():
-    return BlockbookWebsocketBackend("Dogecoin", url="https://doge1.trezor.io")
+    if not USE_DEV_BACKEND:
+        return BlockbookWebsocketBackend("Dogecoin", url="https://doge1.trezor.io")
+
+    else:
+        import ssl
+
+        ctx = ssl.SSLContext()
+        ctx.verify_mode = ssl.CERT_NONE
+
+        return BlockbookWebsocketBackend(
+            "Dogecoin",
+            url="wss://blockbook-dev.corp.sldev.cz:9138/websocket",
+            ssl_context=ctx,
+        )
 
 
 @pytest.fixture
@@ -172,13 +188,22 @@ async def test_fetch_json(backend):
         await backend.fetch_json("completelyFakeMethodThatIJustMadeUp")
 
 
+@pytest.mark.xfail(not USE_DEV_BACKEND, reason="method not on public servers yet")
 @pytest.mark.network
 @pytest.mark.asyncio
 async def test_get_txdata(backend):
     txdata = await backend.get_txdata(BURN_TX)
 
     assert txdata["txid"] == BURN_TX
-    for key in ("vin", "vout", "version", "hex", "confirmations", "blocktime"):
+    for key in (
+        "vin",
+        "vout",
+        "version",
+        "locktime",
+        "hex",
+        "confirmations",
+        "blocktime",
+    ):
         assert key in txdata
 
     vins = txdata["vin"]
@@ -186,17 +211,19 @@ async def test_get_txdata(backend):
     assert len(vins) == 1
     assert len(vouts) == 2
 
-    # for key in ("txid", "vout", "hex", "sequence"):
-    for key in ("txid", "hex", "sequence"):
+    for key in ("txid", "vout", "scriptSig", "sequence"):
         assert key in vins[0]
+    assert "hex" in vins[0]["scriptSig"]
 
     for vout in vouts:
-        for key in ("value", "n", "hex"):
+        for key in ("value", "n", "scriptPubKey"):
             assert key in vout
+        assert "hex" in vout["scriptPubKey"]
 
-    assert BURN_ADDRESS in vouts[0]["addresses"]
+    assert BURN_ADDRESS in vouts[0]["scriptPubKey"]["addresses"]
 
 
+@pytest.mark.xfail(not USE_DEV_BACKEND, reason="method not on public servers yet")
 @pytest.mark.network
 @pytest.mark.asyncio
 async def test_get_txdata_coinbase(backend):

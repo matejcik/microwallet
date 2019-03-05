@@ -1,5 +1,6 @@
 import itertools
 import typing
+from hashlib import sha256
 
 import attr
 import pytest
@@ -209,36 +210,49 @@ async def test_balance(account):
     assert balance == ACTIVE_ADDRESSES * 100
 
 
-@pytest.fixture(scope="function", params=((10, 1), (1, 10), (10, 3)))
-def utxo_account(request, account):
-    active_addresses, utxo_per_address = request.param
-    counter = 0
-    utxo_counter = 0
+@pytest.mark.asyncio
+async def test_estimate_fee(account):
+    async def mock_estimate_fee(blocks):
+        return 12345
+
+    account.backend.estimate_fee = mock_estimate_fee
+
+    fee = await account.estimate_fee()
+    assert fee == 12345
+
+    # check fallback code
+    account.backend.estimate_fee = None
+    fee = await account.estimate_fee()
+    assert fee
+
+
+@pytest.fixture
+def utxo_account(account):
+    UTXO_PER_ADDRESS = 3
+    available_addresses = set(VECTORS[0].addresses[:3])
 
     async def mock_address_data(addr):
-        nonlocal counter
-        total = SATOSHI_PER_UTXO * utxo_per_address if counter < active_addresses else 0
-        counter += 1
+        if addr in available_addresses:
+            total = SATOSHI_PER_UTXO * UTXO_PER_ADDRESS
+        else:
+            total = 0
         return {"address": addr, "totalReceived": total, "balance": total}
 
     async def mock_utxos(addr):
-        nonlocal utxo_counter
-        utxos = []
-        for _ in range(utxo_per_address):
-            utxo = {
-                "txid": "0F" * 32,
-                "vout": utxo_counter,
-                "value": str(SATOSHI_PER_UTXO),
-            }
-            utxos.append(utxo)
-            utxo_counter += 1
-        return utxos
+        if addr not in available_addresses:
+            return []
+
+        txid = sha256(addr.encode()).hexdigest()
+        return [
+            {"txid": txid, "vout": n, "value": str(SATOSHI_PER_UTXO)}
+            for n in range(UTXO_PER_ADDRESS)
+        ]
 
     async def mock_txdata(txid):
         return {"txid": txid}
 
     async def mock_estimate_fee(blocks):
-        return 100
+        return 1000
 
     account.backend.get_address_data = mock_address_data
     account.backend.get_utxos = mock_utxos
@@ -253,6 +267,7 @@ async def test_fund_simple(utxo_account, amount):
     ADDRESS = VECTORS[0].addresses[0]
     utxos, change = await utxo_account.fund_tx([(ADDRESS, amount)])
     assert utxos
+    assert change
     total_spent = sum(u.value for u in utxos)
     assert total_spent > amount
     assert change < total_spent - amount
@@ -266,15 +281,39 @@ async def test_insufficient_funds(utxo_account):
 
 
 @pytest.mark.asyncio
-async def test_change_is_dust(utxo_account):
+async def test_dust_change(utxo_account):
     ADDRESS = VECTORS[0].addresses[0]
-    amount = SATOSHI_PER_UTXO - 100
-    _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
-    assert change == 0
+    dust_limit = utxo_account.coin["dust_limit"]
 
-    # XXX the following does not work because our backend mock is stupid, and returns
-    # active addresses limited number of times, as opposed to limited number of addrs.
-    # So a second call to find_utxos will find 0 active addresses -> game over
-    # amount += 6 * SATOSHI_PER_UTXO
-    # _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
-    # assert change == 0
+    # overfund is dust
+    amount = 2 * SATOSHI_PER_UTXO - (dust_limit - 10)
+    _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    assert change is None
+
+    # overfund is more but returned change would be dust
+    amount = 2 * SATOSHI_PER_UTXO - (dust_limit + 10)
+    _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    assert change is None
+
+
+@pytest.mark.asyncio
+async def test_fee_rolls_over(utxo_account):
+    ADDRESS = VECTORS[0].addresses[0]
+
+    async def mock_estimate_fee(blocks):
+        return 10000
+
+    utxo_account.backend.estimate_fee = mock_estimate_fee
+
+    # small amount but expensive fee
+    amount = 500
+    _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    assert change is not None
+
+    # calculate fee amount
+    fee = SATOSHI_PER_UTXO - amount - change
+
+    # set requested amount so that adding a fee-with-change would go over one UTXO amount
+    amount = SATOSHI_PER_UTXO - fee + 1
+    _, change = await utxo_account.fund_tx([(ADDRESS, amount)])
+    assert change is None
