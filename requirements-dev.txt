@@ -1,6 +1,7 @@
+-r requirements.txt
+
 bumpversion
 wheel
-watchdog
 flake8
 tox
 coverage

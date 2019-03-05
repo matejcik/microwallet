@@ -6,6 +6,7 @@ __pycache__/
 /docs/_build
 /htmlcov
 /.coverage
+/.tox
 
 # Unit test / coverage reports
 .pytest_cache/
