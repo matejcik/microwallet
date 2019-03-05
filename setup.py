@@ -41,7 +41,7 @@ setup(
     packages=find_packages("src", include=["microwallet"]),
     package_dir={"": "src"},
     python_requires=">=3.6",
-    url="https://github.com/matejcik/microwallet",
+    url="https://github.com/trezor/microwallet",
     version="0.1.0",
     zip_safe=False,
 )
