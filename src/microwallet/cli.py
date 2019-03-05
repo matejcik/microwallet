@@ -232,8 +232,6 @@ async def fund(obj, address, amount, json_file, psbt_file, verbose):
 @click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
 @click.option("-n", "--dry-run", is_flag=True, help="Do not sign with Trezor")
 @click.option("-b", "--no-broadcast", is_flag=True, help="Do not broadcast signed transaction")
-@click.option("-j", "--json", type=click.File("w"), help="Store unsigned transaction as JSON")
-@click.option("-p", "--psbt", type=click.File("wb"), help="Store funded transa")
 # fmt: on
 @click.argument("address")
 @click.argument("amount", type=Decimal)

@@ -55,7 +55,7 @@ class BlockbookWebsocketBackend:
         except Exception as e:
             raise RuntimeError(f"Failed to connect to blockbook via {self.url}") from e
         else:
-            LOG.warning(f"Connected to {self.url}: {self.socket}")
+            LOG.info(f"Connected to {self.url}: {self.socket}")
         self._ws_response_cache = {}
 
         # utility subroutines

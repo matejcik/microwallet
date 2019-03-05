@@ -225,7 +225,7 @@ class Account:
         tx_data_with_change["outputs"] = outputs[:] + [change_output]
 
         found_utxos = [u async for u in self.find_utxos()]
-        found_utxos.sort()
+        # found_utxos.sort()
 
         for utxo in found_utxos:
             utxos.append(utxo)
