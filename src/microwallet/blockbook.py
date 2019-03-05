@@ -119,7 +119,7 @@ class BlockbookWebsocketBackend:
         return data["data"]
 
     async def get_txdata(self, txhash):
-        return await self.fetch_json("getTransaction", txid=txhash)
+        return await self.fetch_json("getTransactionSpecific", txid=txhash)
 
     async def get_address_data(self, address):
         data = await self.fetch_json(
