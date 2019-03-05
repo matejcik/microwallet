@@ -188,8 +188,10 @@ class Account:
             if result > 0:
                 return result
         except Exception as e:
-            print(e)
-            return int(self.coin["default_fee_b"]["Normal"]) * 1000
+            pass
+
+        # fallback
+        return int(self.coin["default_fee_b"]["Normal"]) * 1000
 
     async def fund_tx(self, recipients):
         utxos = []
@@ -235,17 +237,32 @@ class Account:
                 continue
 
             fee_without_change = self._calculate_fee(tx_data, fee_rate_kb)
+            fee_with_change = self._calculate_fee(tx_data_with_change, fee_rate_kb)
             overfunds = total - required
 
-            if overfunds == fee_without_change:
-                return utxos, 0
+            # can we even afford transaction fee?
+            if overfunds < fee_without_change:
+                continue
 
-            if overfunds > fee_without_change:
-                fee_with_change = self._calculate_fee(tx_data_with_change, fee_rate_kb)
-                change_amount = overfunds - fee_with_change
-                if change_amount < self.coin["dust_limit"]:
-                    change_amount = 0
-                return utxos, max(0, change_amount)
+            # short-circuit exact match:
+            if overfunds == fee_without_change:
+                return utxos, None
+
+            # short-circuit dust:
+            if overfunds <= self.coin["dust_limit"]:
+                return utxos, None
+
+            # is sending the overfund cheaper than what fee for a change output would be?
+            if overfunds < fee_with_change:
+                return utxos, None
+
+            change_amount = overfunds - fee_with_change
+            # is remaining change dust?
+            if change_amount < self.coin["dust_limit"]:
+                return utxos, None
+
+            # request change back
+            return utxos, change_amount
 
         raise exceptions.InsufficientFunds
 
