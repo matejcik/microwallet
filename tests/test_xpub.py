@@ -1,8 +1,8 @@
 import attr
 import pytest
 
+from microwallet import coins
 from microwallet.formats import xpub
-from trezorlib import coins
 from trezorlib.tools import H_
 
 BITCOIN = coins.by_name["Bitcoin"]

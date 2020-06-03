@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 import websockets
 
-from trezorlib import coins
+from . import coins
 
 LOG = logging.getLogger(__name__)
 

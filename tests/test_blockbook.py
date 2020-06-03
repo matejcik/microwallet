@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 import asynctest
 import pytest
 
+from microwallet import coins
 from microwallet.blockbook import BlockbookWebsocketBackend
-from trezorlib import coins
 
 # Doge transactions and addresses
 BURN_ADDRESS = "D8microwa11etxxxxxxxxxxxxxxxwHnove"

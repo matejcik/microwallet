@@ -22,12 +22,6 @@ def get_subnode(node, i):
     I64 = hmac.HMAC(key=node.chain_code, msg=data, digestmod=hashlib.sha512).digest()
     I_left_as_exponent = int.from_bytes(I64[:32], "big")
 
-    node_out = HDNodeType()
-    node_out.depth = node.depth + 1
-    node_out.child_num = i
-    node_out.chain_code = I64[32:]
-    node_out.fingerprint = hash_160(node.public_key)[:4]
-
     # BIP32 magic converts old public key to new public point
     point = SEC1Encoder.decode_public_key(node.public_key, secp256k1)
     result = I_left_as_exponent * secp256k1.G + point
@@ -36,6 +30,18 @@ def get_subnode(node, i):
         raise ValueError("Point cannot be INFINITY")
 
     # Convert public point to compressed public key
-    node_out.public_key = SEC1Encoder.encode_public_key(result)
+    public_key = SEC1Encoder.encode_public_key(result)
 
-    return node_out
+    return HDNodeType(
+        depth=node.depth + 1,
+        child_num=i,
+        chain_code=I64[32:],
+        fingerprint=hash_160(node.public_key)[:4],
+        public_key=public_key,
+    )
+
+
+def derive(node, path):
+    for i in path:
+        node = get_subnode(node, i)
+    return node

@@ -3,13 +3,13 @@ import typing
 
 import attr
 
-from trezorlib import btc, coins, messages, protobuf, tools, tx_api
+from trezorlib import btc, messages, protobuf, tools
 from trezorlib.client import TrezorClient
 from trezorlib.messages import OutputScriptType, SignTx, TxInputType, TxOutputType
 from trezorlib.transport import enumerate_devices, get_transport
 from trezorlib.ui import ClickUI
 
-from . import account
+from . import account, coins
 from .address import Address
 
 SATOSHIS = account.SATOSHIS
@@ -66,6 +66,11 @@ def get_account(client, coin_name, number, account_type):
     return account.Account(coin_name, n.node, account_type, path=path_prefix)
 
 
+def get_master_fingerprint(client):
+    n = btc.get_public_node(client, tools.parse_path("m/0h"), coin_name="Bitcoin")
+    return int.to_bytes(n.node.fingerprint, 4, "big")
+
+
 def show_address(client, account, address):
     return btc.get_address(
         client,
@@ -96,24 +101,25 @@ def recipient_to_output(address, amount, script_type=OutputScriptType.PAYTOADDRE
     return output
 
 
-def signing_data(account, utxos, recipients, change):
+def signing_data(account, utxos, recipients, change_address, change_amount):
     details = SignTx(version=2)
     prev_txes = {
-        bytes.fromhex(u.tx["txid"]): tx_api.json_to_tx(account.coin, u.tx)
-        for u in utxos
+        bytes.fromhex(u.tx["txid"]): coins.json_to_tx(account.coin, u.tx) for u in utxos
     }
     inputs = [utxo_to_input(u, account.account_type.input_script_type) for u in utxos]
     outputs = [recipient_to_output(address, amount) for address, amount in recipients]
-    change_outputs = [
-        recipient_to_output(address, amount, account.account_type.output_script_type)
-        for address, amount in change
-    ]
+    if change_address is not None:
+        outputs.append(
+            recipient_to_output(
+                change_address, change_amount, account.account_type.output_script_type
+            )
+        )
 
     return TrezorSigningData(
         coin_name=account.coin_name,
         details=details,
         inputs=inputs,
-        outputs=outputs + change_outputs,
+        outputs=outputs,
         prev_txes=prev_txes,
     )
 

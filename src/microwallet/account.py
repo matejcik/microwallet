@@ -6,9 +6,7 @@ from decimal import Decimal
 
 import attr
 
-from trezorlib import coins
-
-from . import account_types, exceptions
+from . import account_types, coins, exceptions
 from .address import Address, derive_output_script
 from .bip32 import get_subnode
 from .blockbook import BlockbookWebsocketBackend

@@ -1,5 +1,6 @@
 """Console script for microwallet."""
 import asyncio
+import base64
 import functools
 import os
 import ssl
@@ -8,9 +9,7 @@ from decimal import Decimal
 
 import click
 
-from trezorlib import coins
-
-from . import account, account_types, exceptions, trezor
+from . import account, account_types, coins, exceptions, trezor, serialize_psbt
 from .account import SATOSHIS
 from .blockbook import BlockbookWebsocketBackend
 
@@ -180,8 +179,7 @@ async def receive(obj, show):
 
 async def do_fund(account, address, amount, verbose):
     try:
-        recipients = [(address, amount)]
-        utxos, change = await account.fund_tx(recipients)
+        utxos, change = await account.fund_tx([(address, amount)])
     except exceptions.InsufficientFunds:
         die("Insufficient funds")
 
@@ -199,31 +197,43 @@ async def do_fund(account, address, amount, verbose):
         fee_out = actual_fee / SATOSHIS
         click.echo(f"Fee: {fee_out:f} {symbol} (at {fee_rate} sat/KB)", err=True)
 
-    change_rcpts = []
     if change is not None:
         change_addr = await account.get_unused_address(change=True)
-        change_rcpts.append((change_addr, change))
+    else:
+        change_addr = None
+        change = 0
 
-    return trezor.signing_data(account, utxos, recipients, change_rcpts)
+    return utxos, change_addr, change
 
 
 @async_command
 # fmt: off
 @click.option("-v", "--verbose", is_flag=True, help="Print transaction details to console")
 @click.option("-j", "--json", "json_file", type=click.File("w"), help="Store a JSON transaction")
-@click.option("-p", "--psbt", "psbt_file", type=click.File("wb"), help="Store as BIP-174 PSBT")
+@click.option("-p", "--psbt-file", type=click.File("wb"), help="Store as BIP-174 PSBT binary")
+@click.option("-P", "--psbt", is_flag=True, help="Print transaction as Base64-encoded PSBT")
 @click.argument("address")
 @click.argument("amount", type=Decimal)
 # fmt: on
-async def fund(obj, address, amount, json_file, psbt_file, verbose):
-    _, account = obj
-    signing_data = await do_fund(account, address, amount, verbose)
+async def fund(obj, address, amount, json_file, psbt, psbt_file, verbose):
+    client, account = obj
+    utxos, change_addr, change_amount = await do_fund(account, address, amount, verbose)
+    signing_data = trezor.signing_data(
+        account, utxos, [(address, amount)], change_addr, change_amount
+    )
     if json_file:
         json_file.write(signing_data.to_json())
         json_file.write("\n")
-    if psbt_file:
-        click.echo("PSBT not ready just yet")
-    if not json_file and not psbt_file:
+    if psbt or psbt_file:
+        fingerprint = trezor.get_master_fingerprint(client)
+        psbt_bytes = serialize_psbt.make_psbt(
+            fingerprint, account, utxos, [(address, amount)], change_addr, change_amount
+        )
+        if psbt_file:
+            psbt_file.write(psbt_bytes)
+        if psbt:
+            click.echo(base64.b64encode(psbt_bytes).decode())
+    if not json_file and not psbt_file and not psbt:
         click.echo(signing_data.to_json(indent=4))
 
 

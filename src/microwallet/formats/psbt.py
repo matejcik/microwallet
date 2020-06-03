@@ -29,7 +29,7 @@ PsbtEnvelope = c.FocusedSeq("sequences",
 )
 
 Bip32Field = c.Struct(
-    "fingerprint" / c.Int32ul,
+    "fingerprint" / c.Bytes(4),
     "address_n" / c.GreedyRange(c.Int32ul),
 )
 # fmt: on
@@ -64,6 +64,8 @@ class PsbtMapType:
             return None
         if field_type is bytes:
             return field_bytes
+        if field_type is str:
+            return field_bytes.decode()
         if isinstance(field_type, c.Construct):
             return field_type.parse(field_bytes)
         else:
@@ -73,6 +75,8 @@ class PsbtMapType:
     def _encode_field(field_type, field_value):
         if field_type is bytes:
             return field_value
+        if field_type is str:
+            return field_value.encode()
         if isinstance(field_type, c.Construct):
             return field_type.build(field_value)
         else:
@@ -127,7 +131,11 @@ class PsbtMapType:
 
 
 class PsbtGlobalType(PsbtMapType):
-    FIELDS = {0x00: ("transaction", None, Transaction)}
+    FIELDS = {
+        0x00: ("transaction", None, Transaction),
+        0x01: ("global_xpub", None, bytes),
+        0x02: ("version", None, c.Int32ul),
+    }
 
     def __init__(self, **kwargs):
         self.transaction = None
@@ -145,6 +153,7 @@ class PsbtInputType(PsbtMapType):
         0x06: ("bip32_path", bytes, Bip32Field),
         0x07: ("script_sig", None, bytes),
         0x08: ("witness", None, bytes),
+        0x09: ("por_commitment", None, str),
     }
 
     def __init__(self, **kwargs):
@@ -179,8 +188,8 @@ def read_psbt(psbt_bytes):
         psbt = PsbtEnvelope.parse(psbt_bytes)
         if not psbt:
             raise PsbtError("Empty PSBT envelope")
-        tx_entry = PsbtGlobalType.from_sequence(psbt[0])
-        tx = tx_entry.transaction
+        main = PsbtGlobalType.from_sequence(psbt[0])
+        tx = main.transaction
         if len(psbt) != 1 + len(tx.inputs) + len(tx.outputs):
             raise PsbtError("PSBT length does not match embedded transaction")
 
@@ -188,16 +197,16 @@ def read_psbt(psbt_bytes):
         output_seqs = psbt[1 + len(tx.inputs) :]
         inputs = [PsbtInputType.from_sequence(s) for s in input_seqs]
         outputs = [PsbtOutputType.from_sequence(s) for s in output_seqs]
-        return tx, inputs, outputs
+        return main, inputs, outputs
 
     except c.ConstructError as e:
         raise PsbtError("Could not parse PBST") from e
 
 
-def write_psbt(tx, inputs, outputs):
-    sequences = []
-    tx_entry = PsbtGlobalType(transaction=tx)
-    sequences.append(tx_entry.to_sequence())
-    sequences += [inp.to_sequence() for inp in inputs]
-    sequences += [out.to_sequence() for out in outputs]
+def write_psbt(main, inputs, outputs):
+    sequences = (
+        [main.to_sequence()]
+        + [inp.to_sequence() for inp in inputs]
+        + [out.to_sequence() for out in outputs]
+    )
     return PsbtEnvelope.build(sequences)

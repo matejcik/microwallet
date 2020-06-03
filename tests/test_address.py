@@ -1,7 +1,6 @@
 import pytest
 
-from microwallet import address
-from trezorlib import coins
+from microwallet import address, coins
 
 VECTORS_P2PKH = [
     # m/44h/0h/15h/0/3

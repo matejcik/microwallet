@@ -67,7 +67,9 @@ def derive_output_script(coin, address):
     bech32_prefix = coin.get("bech32_prefix", "---")
     witver, witprog = bech32.decode(bech32_prefix, address)
     if witver is not None and witprog is not None:
-        return witver.to_bytes(1, "little") + witprog
+        return (
+            witver.to_bytes(1, "little") + len(witprog).to_bytes(1, "little") + witprog
+        )
 
     address_bytes = b58check_decode(address)
     p2sh_version = version_to_bytes(coin["address_type_p2sh"])

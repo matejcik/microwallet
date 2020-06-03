@@ -113,7 +113,7 @@ def decode(hrp, addr):
         return (None, None)
     if data[0] == 0 and len(decoded) != 20 and len(decoded) != 32:
         return (None, None)
-    return (data[0], decoded)
+    return (data[0], bytes(decoded))
 
 
 def encode(hrp, witver, witprog):
