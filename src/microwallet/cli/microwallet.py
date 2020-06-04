@@ -9,7 +9,8 @@ from decimal import Decimal
 
 import click
 
-from microwallet import account, account_types, coins, exceptions, trezor, serialize_psbt
+from microwallet import account, account_types, coins, exceptions, trezor
+from microwallet.psbt import make_psbt
 from microwallet.account import SATOSHIS
 from microwallet.blockbook import BlockbookWebsocketBackend
 
@@ -226,7 +227,7 @@ async def fund(obj, address, amount, json_file, psbt, psbt_file, verbose):
         json_file.write("\n")
     if psbt or psbt_file:
         fingerprint = trezor.get_master_fingerprint(client)
-        psbt_bytes = serialize_psbt.make_psbt(
+        psbt_bytes = make_psbt(
             fingerprint, account, utxos, [(address, amount)], change_addr, change_amount
         )
         if psbt_file:

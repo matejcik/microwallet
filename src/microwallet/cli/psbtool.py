@@ -1,4 +1,5 @@
 import base64
+import json
 import sys
 from typing import Any
 
@@ -6,8 +7,11 @@ import click
 import construct as c
 
 from trezorlib import messages as m
+from trezorlib.protobuf import to_dict
 from trezorlib.tools import HARDENED_FLAG
 from microwallet.formats import psbt
+from microwallet.psbt import trezor
+from microwallet import coins
 
 
 def unparse_path(address_n):
@@ -74,7 +78,7 @@ def get_psbt_bytes(psbt_base64, psbt_file):
         psbt_data = psbt_file.read()
         try:
             # try to decode base64. if this failed, interpret as raw bytes
-            return base64.b64decode(psbt_data)
+            return base64.b64decode(psbt_data, validate=True)
         except Exception:
             return psbt_data
     else:
@@ -113,16 +117,18 @@ def psbt_read(psbt_base64, psbt_file):
 @click.argument("psbt_base64", required=False)
 @click.option("-f", "--file", "psbt_file", type=click.File("rb"))
 @click.option("-c", "--coin-name", default="Bitcoin")
-def to_json(psbt_base64, psbt_file):
+def to_json(psbt_base64, psbt_file, coin_name):
     """Convert PSBT to Trezor-compatible JSON transaction.
     
     You can use `trezorctl btc sign-tx <file>` to sign it."""
     psbt_bytes = get_psbt_bytes(psbt_base64, psbt_file)
     header, inputs, outputs = psbt.read_psbt(psbt_bytes)
 
+    coin = coins.by_name[coin_name]
+
     fingerprints = set()
     for inout in inputs + outputs:
-        for path in inout.bip32_path.values:
+        for path in inout.bip32_path.values():
             fingerprints.add(path.fingerprint)
 
     if not fingerprints:
@@ -135,17 +141,44 @@ def to_json(psbt_base64, psbt_file):
         )
         # TODO allow specifying or allow using all
 
-    tx_details = {
+    master_fingerprint = fingerprints.pop()
+
+    details_dict = {
         "version": header.transaction.version,
         "lock_time": header.transaction.lock_time,
     }
-    details = m.SignTx(**tx_details)
+    trezor_details = trezor.make_signing_details(header.transaction)
 
-    inputs = [
-        m.TxInputType(prev_hash=txi.tx, prev_index=txi.index, sequence=txi.sequence)
-        for txi in header.transaction.inputs
-    ]
-    outputs = [m.TxOutputType(amount=txo.value) for txo in header.transaction.outputs]
+    trezor_inputs = []
+    trezor_outputs = []
+    prev_txes = {}
+
+    for i, (tx_in, psbt_in) in enumerate(zip(header.transaction.inputs, inputs), 1):
+        try:
+            trezor_in = trezor.make_input(tx_in, psbt_in, master_fingerprint)
+            trezor_inputs.append(trezor_in)
+            prev_txes[tx_in.tx] = trezor.make_transaction(psbt_in.non_witness_utxo)
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            raise click.ClickException(f"In input #{i}: {e}") from e
+
+    for i, (tx_out, psbt_out) in enumerate(zip(header.transaction.outputs, outputs), 1):
+        try:
+            trezor_out = trezor.make_output(tx_out, psbt_out, master_fingerprint, coin)
+            trezor_outputs.append(trezor_out)
+        except Exception as e:
+            raise click.ClickException(f"In output #{i}: {e}") from e
+
+    tx = dict(
+        coin_name=coin_name,
+        details=to_dict(trezor_details),
+        inputs=[to_dict(txi) for txi in trezor_inputs],
+        outputs=[to_dict(txo) for txo in trezor_outputs],
+        prev_txes={key.hex(): to_dict(val) for key, val in prev_txes.items()},
+    )
+    click.echo(json.dumps(tx, sort_keys=True, indent=2))
 
 
 if __name__ == "__main__":
