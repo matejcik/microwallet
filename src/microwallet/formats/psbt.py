@@ -1,7 +1,12 @@
+import warnings
+
 import construct as c
 
 from . import CompactUint, Optional
 from .transaction import Transaction, TxOutput
+
+
+PSBT_PROPRIETARY_BYTE = 0xFC
 
 
 class PsbtError(Exception):
@@ -17,6 +22,12 @@ PsbtKeyValue = c.Struct(
     "value" / c.Prefixed(CompactUint, c.GreedyBytes),
 )
 
+PsbtProprietaryKey = c.Struct(
+    "prefix" / c.CString("utf-8"),
+    "subtype" / CompactUint,
+    "data" / Optional(c.GreedyBytes),
+)
+
 PsbtSequence = c.FocusedSeq("content",
     "content" / c.GreedyRange(PsbtKeyValue),
     c.Const(b"\0"),
@@ -27,6 +38,7 @@ PsbtEnvelope = c.FocusedSeq("sequences",
     "sequences" / c.GreedyRange(PsbtSequence),
     c.Terminated,
 )
+
 
 Bip32Field = c.Struct(
     "fingerprint" / c.Bytes(4),
@@ -39,6 +51,8 @@ class PsbtMapType:
     FIELDS = {}
 
     def __init__(self, **kwargs):
+        self._proprietary = {}
+        self._unknown = {}
         for name, keytype, _ in self.FIELDS.values():
             if name in kwargs:
                 value = kwargs[name]
@@ -57,6 +71,10 @@ class PsbtMapType:
                 continue
             d[key] = value
         return "<%s: %s>" % (self.__class__.__name__, d)
+
+    def __bool__(self):
+        """Return False if no fields are set, True otherwise"""
+        return any(v is not None and v != {} for v in self.__dict__.values())
 
     @staticmethod
     def _decode_field(field_type, field_bytes):
@@ -92,8 +110,17 @@ class PsbtMapType:
                 raise PsbtError(f"Duplicate key type 0x{key:02x}")
             seen_keys.add((key, v.key.data))
 
+            if key == PSBT_PROPRIETARY_BYTE:
+                prop_key = PsbtProprietaryKey.parse(v.key.data)
+                prop_dict = psbt._proprietary.setdefault(prop_key.prefix, {})
+                prop_dict[prop_key.subtype, prop_key.data] = v.value
+                continue
+
             if key not in cls.FIELDS:
-                raise PsbtError(f"Unknown field type 0x{key:02x}")
+                warnings.warn(f"Unknown field type 0x{key:02x}")
+                psbt._unknown[key, v.key.data] = v.value
+                continue
+
             name, keydata_type, value_type = cls.FIELDS[key]
             if keydata_type is None and v.key.data:
                 raise PsbtError(f"Key data not allowed on '{name}'")
@@ -127,6 +154,16 @@ class PsbtMapType:
                     value_bytes = self._encode_field(value_type, value)
                     v = dict(key=dict(type=key, data=keydata_bytes), value=value_bytes)
                     sequence.append(v)
+        for (key_type, key_data), value in self._unknown.items():
+            v = dict(key=dict(type=key_type, data=key_data), value=value)
+            sequence.append(v)
+        for prefix, proprietary in self._proprietary.items():
+            for (key_subtype, key_data), value in proprietary.items():
+                data = PsbtProprietaryKey.build(
+                    dict(prefix=prefix, subtype=key_subtype, data=key_data)
+                )
+                v = dict(key=dict(type=PSBT_PROPRIETARY_BYTE, data=data), value=value)
+                sequence.append(v)
         return sequence
 
 
@@ -139,6 +176,8 @@ class PsbtGlobalType(PsbtMapType):
 
     def __init__(self, **kwargs):
         self.transaction = None
+        self.global_xpub = None
+        self.version = None
         super().__init__(**kwargs)
 
 
