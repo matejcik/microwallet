@@ -31,7 +31,12 @@ setup(
         "Programming Language :: Python :: 3.7",
     ],
     description="Bitcoin CLI wallet backed by Trezor hardware",
-    entry_points={"console_scripts": ["microwallet=microwallet.cli:main"]},
+    entry_points={
+        "console_scripts": [
+            "microwallet=microwallet.cli.microwallet:main",
+            "psbtool=microwallet.cli.psbtool:main",
+        ]
+    },
     install_requires=requirements,
     license="GNU General Public License v3",
     long_description=readme + "\n\n" + history,

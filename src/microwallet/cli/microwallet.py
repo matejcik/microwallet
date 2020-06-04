@@ -9,9 +9,9 @@ from decimal import Decimal
 
 import click
 
-from . import account, account_types, coins, exceptions, trezor, serialize_psbt
-from .account import SATOSHIS
-from .blockbook import BlockbookWebsocketBackend
+from microwallet import account, account_types, coins, exceptions, trezor, serialize_psbt
+from microwallet.account import SATOSHIS
+from microwallet.blockbook import BlockbookWebsocketBackend
 
 DEV_BACKEND_PORTS = {
     "Bitcoin": 9130,
