@@ -8,8 +8,11 @@ BitcoinBytes = c.Prefixed(CompactUint, c.GreedyBytes)
 Encoded as a CompactUint length followed by that many bytes.
 """
 
+TxHash = c.Transformed(c.Bytes(32), lambda b: b[::-1], 32, lambda b: b[::-1], 32)
+"""Transaction hash, encoded as a reversed sequence of bytes."""
+
 TxInput = c.Struct(
-    "tx" / c.Bytes(32),
+    "tx" / TxHash,
     "index" / c.Int32ul,
     "script_sig" / BitcoinBytes,
     "sequence" / c.Int32ul,

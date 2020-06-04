@@ -18,7 +18,7 @@ def make_transaction(
 ) -> Dict[Any, Any]:
     def make_tx_input(utxo: Utxo) -> Dict[Any, Any]:
         return dict(
-            tx=bytes.fromhex(utxo.tx["txid"])[::-1],
+            tx=bytes.fromhex(utxo.tx["txid"]),
             index=utxo.vout,
             script_sig=b"",
             sequence=0xFFFF_FFFD,
@@ -46,7 +46,7 @@ def non_witness_utxo(utxo: Utxo) -> Dict[Any, Any]:
     tx = utxo.tx
     inputs = [
         dict(
-            tx=bytes.fromhex(i["txid"])[::-1],
+            tx=bytes.fromhex(i["txid"]),
             index=int(i["vout"]),
             script_sig=bytes.fromhex(i["scriptSig"]["hex"]),
             sequence=int(i["sequence"]),
